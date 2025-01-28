@@ -9,3 +9,5 @@ torch==2.5.1; sys_platform == 'linux'
 # For Windows
 --extra-index-url https://download.pytorch.org/whl/cu121 # 在Linux下请把这一行注释掉
 torch==2.5.1; sys_platform == 'win32'
+
+git+https://github.com/fla-org/flash-linear-attention
