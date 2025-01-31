@@ -1,3 +1,5 @@
+## TODO: 适配RWKV-7模型
+import math
 import torch
 from tqdm import tqdm
 from torch import nn, optim
@@ -31,12 +33,10 @@ if __name__ == '__main__':
     # 根据配置文件创建模型
     print("Loading model...")
     model = LLM(
-        vocab_size=vocab_size,
+        vocab_size=2 ** math.ceil(math.log2(vocab_size)), # 确保vocab_size为2的幂
         dim=train_config['model_dim'],
-        max_length=train_config['max_length'],
-        n_heads=train_config['num_heads'],
-        n_blocks=train_config['num_layers'],
-        dropout=train_config['dropout']
+        n_blocks=train_config['n_layers'],
+        max_lr=train_config['max_learning_rate']
     )
     # 统计参数量
     params = sum(p.numel() for p in model.parameters() if p.requires_grad)

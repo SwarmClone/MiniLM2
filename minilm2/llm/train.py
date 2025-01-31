@@ -1,3 +1,4 @@
+import math
 import torch
 from tqdm import tqdm
 from torch import nn, optim
@@ -9,11 +10,17 @@ from .validate import validate
 from . import config
 from .lr_schedule import get_lr_schedule
 
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True # 尽量不报错
+
 if __name__ == '__main__':
     import sys
     import os
     import json
     
+    print("Setting random seed: 42")
+    torch.random.manual_seed(42) # 保证每次训练的结果一致
+
     from tokenizers import Tokenizer # type: ignore
     if len(sys.argv) < 2:
         print('Usage: python -m minilm2.llm.train <config_path>')
@@ -31,12 +38,10 @@ if __name__ == '__main__':
     # 根据配置文件创建模型
     print("Loading model...")
     model = LLM(
-        vocab_size=vocab_size,
+        vocab_size=2 ** math.ceil(math.log2(vocab_size)), # 确保vocab_size为2的幂
         dim=train_config['model_dim'],
-        max_length=train_config['max_length'],
-        n_heads=train_config['num_heads'],
         n_blocks=train_config['num_layers'],
-        dropout=train_config['dropout']
+        max_lr=train_config['max_learning_rate']
     )
     # 统计参数量
     params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -67,7 +72,13 @@ if __name__ == '__main__':
     )
 
     # 定义优化器
-    optimizer = optim.AdamW(model.parameters(), fused=True, weight_decay=0.0)
+    optimizer = optim.AdamW(
+        model.parameters(),
+        fused=True,
+        weight_decay=0.0,
+        betas=(0.9, 0.99),
+        eps=1e-18
+    )
 
     # 定义学习率衰减策略
     lr_schedule = get_lr_schedule(
@@ -84,6 +95,7 @@ if __name__ == '__main__':
     log_fname = os.path.join(config_dir, train_config['log_file'])
     print(f"==> Log file: {log_fname}")
     torch.set_float32_matmul_precision('high') # 调整精度以加速训练
+    torch.autograd.set_detect_anomaly(True) # 也许可以在梯度爆炸时发出警告
     try:
         with tqdm(train_loader) as pbar:
             for x, y in pbar:
@@ -112,9 +124,7 @@ if __name__ == '__main__':
                 # 一个step的结束，更新参数并保存日志
                 if micro_step % train_config['n_batches_per_step'] == 0:
                     step += 1
-                    nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                     optimizer.step()
-                    model.normalize()
                     open(log_fname, 'a').write(f'TRAIN,{step},{lr},{total_loss}\n')
                     total_loss = 0.0
 
