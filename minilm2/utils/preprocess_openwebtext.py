@@ -15,7 +15,9 @@ def worker(text_path: str, tokenizer: Tokenizer, id: int, q: multiprocessing.Que
             np.array(ids, dtype=np.uint16).tofile(f_bin)
 
 def preprocess_openwebtext(text_path: str, bin_path: str, tokenizer: Tokenizer):
-    n_workers = 16
+    n_workers = os.cpu_count()
+    if n_workers is None:
+        n_workers = 1
     workers = []
     for i in range(n_workers):
         p = multiprocessing.Process(target=worker, args=(text_path, tokenizer, i, q))
