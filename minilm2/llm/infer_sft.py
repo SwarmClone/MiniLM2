@@ -5,18 +5,19 @@ from torch.nn import functional as F
 from .model import NGPT, RWKV7
 from . import config
 from tokenizers import Tokenizer # type: ignore
+from transformers import AutoTokenizer, AutoModelForCausalLM # type: ignore
 
 def build_context(history: list[tuple[str, str]], tokenizer: Tokenizer,
                 max_length: int, system_prompt: str | None = None) -> torch.Tensor:
     ids = []
-    human_prefix_ids = tokenizer.encode(config.HUMAN_PREFIX).ids
-    ai_prefix_ids = tokenizer.encode(config.AI_PREFIX).ids
-    separator_ids = tokenizer.encode("\n" * 3).ids
-    system_prompt_ids = tokenizer.encode(system_prompt).ids + separator_ids if system_prompt else []
+    human_prefix_ids = tokenizer.encode(config.HUMAN_PREFIX)
+    ai_prefix_ids = tokenizer.encode(config.AI_PREFIX)
+    separator_ids = tokenizer.encode("\n" * 3)
+    system_prompt_ids = tokenizer.encode(system_prompt) + separator_ids if system_prompt else []
     for i in range(len(history)):
         turn = history[i]
-        ids += human_prefix_ids + tokenizer.encode(turn[0]).ids + separator_ids
-        ids += ai_prefix_ids + tokenizer.encode(turn[1]).ids
+        ids += human_prefix_ids + tokenizer.encode(turn[0]) + separator_ids
+        ids += ai_prefix_ids + tokenizer.encode(turn[1])
         if i < len(history) - 1:
             ids += separator_ids
     ids = system_prompt_ids + ids[len(system_prompt_ids)-max_length:]
@@ -42,38 +43,17 @@ if __name__ == '__main__':
 
     # 加载tokenizer并获取词表大小
     print("Loading tokenizer...")
-    tokenizer = Tokenizer.from_file(os.path.join(config_dir, train_config['tokenizer_path']))
-    vocab_size = tokenizer.get_vocab_size()
+    tokenizer = AutoTokenizer.from_pretrained(os.path.join(config_dir, train_config['tokenizer_path']))
+    vocab_size = len(tokenizer.get_vocab())
     print(f"==> Vocab size: {vocab_size}")
 
     # 根据配置文件创建模型
     model_type = train_config["model"]
     print(f"Loading {model_type} model...")
-    model: torch.nn.Module
-    if model_type == "NGPT":
-        model = NGPT(
-            vocab_size=vocab_size,
-            dim=train_config['model_dim'],
-            max_length=train_config['max_length'],
-            n_heads=train_config['num_heads'],
-            n_blocks=train_config['num_layers'],
-            dropout=0 # 推理时不使用dropout
-        )
-    elif model_type == "RWKV7":
-        model = RWKV7(
-            vocab_size=2 ** math.ceil(math.log2(vocab_size)), # 确保vocab_size为2的幂
-            dim=train_config['model_dim'],
-            n_blocks=train_config['num_layers'],
-            max_lr=train_config['max_learning_rate']
-        )
+    model = AutoModelForCausalLM.from_pretrained(os.path.join(config_dir, train_config['model_path']))
     # 统计参数量
     params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"==> Number of parameters: {params / 1e6:.2f}M")
-    # 加载已有的检查点
-    if train_config['checkpoint_file']:
-        checkpoint_path = os.path.join(config_dir, train_config['checkpoint_file'])
-        print(f"==> Loading checkpoint from {checkpoint_path}, step={train_config['checkpoint_step']}")
-        model.load_state_dict(torch.load(checkpoint_path, weights_only=True))
 
     # 将模型移动到显存并编译以加速推理
     print(f"==> Using device: {config.DEVICE}")
@@ -193,7 +173,7 @@ if __name__ == '__main__':
                     last_out = token_id.unsqueeze(0)
                     prob = probs[sample].item()
                     confidence_level = round(prob ** 0.5 * 16) # 开方以增大低概率时的颜色差异
-                    token = tokenizer.id_to_token(token_id.item())
+                    token = tokenizer.convert_ids_to_tokens([token_id.item()])[0]
                     if token == "\n":
                         n_blankline += 1
                         if n_blankline >= 3:

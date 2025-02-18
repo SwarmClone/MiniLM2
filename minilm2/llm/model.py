@@ -1,11 +1,28 @@
 import math
+from collections import namedtuple
 import torch
 from torch import nn
 import torch.nn.functional as F
+from transformers import ( # type: ignore
+    PreTrainedModel,
+    PretrainedConfig,
+    AutoConfig,
+    AutoModelForCausalLM,
+    GenerationMixin
+)
 
 # nGPT
 normalize = lambda x, dim=-1: F.normalize(x, p=2, dim=dim)
 
+class NGPTConfig(PretrainedConfig):
+    model_type = "ngpt"
+    # 默认参数
+    vocab_size: int = 32768
+    dim = 768
+    n_blocks = 12
+    n_heads = 12
+    max_position_embeddings = 1024
+    dropout = .0
 
 class RotatoryPositionalEncoding(nn.Module):
     """旋转位置编码"""
@@ -211,40 +228,47 @@ class NGPTBlock(nn.Module):
         self.mlp.normalize()
 
 
-class NGPT(nn.Module):
+class NGPT(PreTrainedModel, GenerationMixin):
     """大模型本体"""
-
-    def __init__(self, vocab_size: int, dim: int, max_length: int, n_heads: int,
-                 n_blocks: int, dropout: float):
-        super().__init__()
-        self.wte = nn.Embedding(vocab_size, dim)
+    config_class = NGPTConfig
+    def __init__(self, config: PretrainedConfig):
+        super().__init__(config)
+        self.config = config
+        self.wte = nn.Embedding(self.config.vocab_size, self.config.dim)
         self.blocks = nn.ModuleList([
-            NGPTBlock(dim, max_length, n_heads, dropout) for _ in range(n_blocks)
+            NGPTBlock(
+                self.config.dim,
+                self.config.max_position_embeddings,
+                self.config.n_heads,
+                self.config.dropout
+            ) for _ in range(self.config.n_blocks)
         ])
-        self.lmhead = nn.Linear(dim, vocab_size)
+        self.lm_head = nn.Linear(self.config.dim, self.config.vocab_size)
 
         # Logit缩放因数
         szinit = 1.0
-        szscale = 1 / dim ** 0.5
+        szscale = 1 / self.config.dim ** 0.5
         self.restore_scale = szinit / szscale
-        self.sz = nn.Parameter(torch.ones(vocab_size) * szscale)
+        self.sz = nn.Parameter(torch.ones(self.config.vocab_size) * szscale)
 
         self.normalize()
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, return_dict=False):
+        print(return_dict)
         x = self.wte(x)
         for block in self.blocks:
             x = block(x)
-        x = self.lmhead(x)
+        x = self.lm_head(x)
         actual_sz = self.sz * self.restore_scale
-        return x * actual_sz
+        out = x * actual_sz
+        return out if not return_dict else namedtuple("NGPTOutput", ["logits"])(logits=out)
 
     @torch.no_grad() # 此方法仅用于推理，不需要梯度
     def update(self, x: torch.Tensor):
         x = self.wte(x)
         for block in self.blocks:
             x = block.update(x)
-        x = self.lmhead(x)
+        x = self.lm_head(x)
         actual_sz = self.sz * self.restore_scale
         return x * actual_sz
 
@@ -254,14 +278,33 @@ class NGPT(nn.Module):
     @torch.no_grad()
     def normalize(self) -> None:
         self.wte.weight.data.copy_(normalize(self.wte.weight.data))
-        self.lmhead.weight.data.copy_(normalize(self.lmhead.weight.data))
+        self.lm_head.weight.data.copy_(normalize(self.lm_head.weight.data))
         for block in self.blocks:
             block.normalize()
 
+    def prepare_inputs_for_generation(self, input_ids, **kwargs):
+        # 准备输入，用于生成
+        t = torch.tensor(input_ids, device=self.device)
+        if len(t.shape) == 1:
+            t = t.unsqueeze(0)
+        return {"x": t}
 
+AutoConfig.register("ngpt", NGPTConfig)
+AutoModelForCausalLM.register(NGPTConfig, NGPT)
+
+# ----------------------------------------------------------------------------
 # RWKV-7: https://github.com/BlinkDL/RWKV-LM
 from fla.layers import RWKV7Attention  # type: ignore
 
+class RWKV7Config(PretrainedConfig):
+    model_type = "rwkv7"
+    # 默认参数
+    vocab_size: int = 32768
+    dim = 768
+    n_blocks = 12
+    max_length = 1024
+    dropout = .0
+    max_lr = 1e-4
 
 class TMix(nn.Module):
     def __init__(self, dim: int, block_id: int, n_blocks: int):
@@ -382,7 +425,6 @@ class CMix(nn.Module):
 
 class RWKV7Block(nn.Module):
     """一个Decoder块"""
-
     def __init__(self, dim: int, block_id: int, n_blocks: int):
         super().__init__()
         self.attn = TMix(dim, block_id, n_blocks)
@@ -398,31 +440,34 @@ class RWKV7Block(nn.Module):
         return x, v_first
 
 
-class RWKV7(nn.Module):
+class RWKV7(PreTrainedModel, GenerationMixin):
     """大模型本体"""
-
-    def __init__(self, vocab_size: int, dim: int,
-                 n_blocks: int, max_lr: float):
-        assert dim % 64 == 0, "dim必须是64的倍数"
-        assert math.log2(vocab_size).is_integer(), "vocab_size必须是2的幂"
-        super().__init__()
-        self.wte = nn.Embedding(vocab_size, dim)
+    config_class = RWKV7Config
+    def __init__(self, config: PretrainedConfig):
+        super().__init__(config)
+        self.config = config
+        assert self.config.dim % 64 == 0, "dim必须是64的倍数"
+        assert math.log2(self.config.vocab_size).is_integer(), "vocab_size必须是2的幂"
+        self.wte = nn.Embedding(self.config.vocab_size, self.config.dim)
         self.blocks = nn.ModuleList([
-            RWKV7Block(dim, i, n_blocks)
-            for i in range(n_blocks)
+            RWKV7Block(self.config.dim, i, self.config.n_blocks)
+            for i in range(self.config.n_blocks)
         ])
-        self.lmhead = nn.Linear(dim, vocab_size)
-        self.norm_in = nn.LayerNorm(dim)
-        self.norm_out = nn.LayerNorm(dim)
-        self.wte.weight.data.uniform_(-max_lr, max_lr)
-        nn.init.orthogonal_(self.lmhead.weight, gain=0.5)
+        self.lm_head = nn.Linear(self.config.dim, self.config.vocab_size)
+        self.norm_in = nn.LayerNorm(self.config.dim)
+        self.norm_out = nn.LayerNorm(self.config.dim)
+        self.wte.weight.data.uniform_(-self.config.max_lr, self.config.max_lr)
+        nn.init.orthogonal_(self.lm_head.weight, gain=0.5)
 
     def forward(self, x: torch.Tensor):
         x = self.norm_in(self.wte(x))
         v_first = None
         for block in self.blocks:
             x, v_first = block(x, v_first)
-        return self.lmhead(self.norm_out(x))
+        return self.lm_head(self.norm_out(x))
 
     def save(self, path: str):
         torch.save(self.state_dict(), path)  # 保存模型参数防止带上不必要的前缀
+
+AutoConfig.register("rwkv7", RWKV7Config)
+AutoModelForCausalLM.register(RWKV7Config, RWKV7)

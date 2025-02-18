@@ -2,7 +2,7 @@
     "model": "NGPT",
     
     "dataset_path": "../../datasets/sft/dataset.json",
-    "tokenizer_path": "../tokenizer32k.json",
+    "tokenizer_path": "../tokenizers/tokenizer32k",
     "max_length": 1024,
     "model_dim": 1024,
     "num_heads": 16,
@@ -22,6 +22,7 @@
     "top_p": 0.6,
     "temperature": 0.5,
 
+    "model_path": "../transformers/ngpt/sft0.4b",
     "checkpoint_file": "checkpoint_2000_bilingual.pt",
     "checkpoint_step": 2000,
 

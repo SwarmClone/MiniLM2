@@ -1,0 +1,14 @@
+{
+  "architectures": [
+    "NGPT"
+  ],
+  "dim": 1024,
+  "dropout": 0,
+  "max_positional_embeddings": 1024,
+  "model_type": "ngpt",
+  "n_blocks": 20,
+  "n_heads": 16,
+  "torch_dtype": "float32",
+  "transformers_version": "4.47.1",
+  "vocab_size": 32584
+}

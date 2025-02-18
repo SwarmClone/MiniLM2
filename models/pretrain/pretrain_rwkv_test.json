@@ -2,7 +2,7 @@
     "model": "RWKV7",
     
     "dataset_path": "../../datasets/sft/dataset.json",
-    "tokenizer_path": "../tokenizer32k.json",
+    "tokenizer_path": "../tokenizers/tokenizer32k",
     "max_length": 1024,
     "model_dim": 768,
     "num_layers": 12,

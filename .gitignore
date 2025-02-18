@@ -175,10 +175,4 @@ datasets/
 
 # Checkpoints
 *.pt
-.idea/
-
-# Qwen dummy model
-Qwen/
-
-# Coqui TTS model
-coqui/
+*.safetensors
