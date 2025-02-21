@@ -1,8 +1,8 @@
 {
     "model": "NGPT",
     
-    "dataset_path": "../../datasets/pretrain/dataset.json",
-    "tokenizer_path": "../tokenizers/tokenizer32k",
+    "dataset_path": "../datasets/pretrain/dataset.json",
+    "tokenizer_path": "tokenizers/tokenizer32k",
     "max_length": 1024,
     "model_dim": 1024,
     "num_heads": 16,
@@ -20,7 +20,7 @@
     "top_p": 0.1,
     "temperature": 0.5,
 
-    "model_path": "../transformers/ngpt/pretrain0.4b",
+    "model_path": "transformers/ngpt/pretrain0.4b",
     "checkpoint_step": 20000,
 
     "log_file": "pretrain.log"

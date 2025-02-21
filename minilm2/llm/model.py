@@ -295,7 +295,7 @@ class RWKV7Config(PretrainedConfig):
     vocab_size: int = 32768
     dim = 768
     n_blocks = 12
-    max_length = 1024
+    max_position_embeddings = 1024
     dropout = .0
     max_lr = 1e-4
 
@@ -383,10 +383,16 @@ class TMix(nn.Module):
 
             del ddd, x_r, x_w, x_k, x_v, x_a, x_g, x_x, w1, w2, w0, a1, a2, a0, g1, g2
 
-    def forward(self, x: torch.Tensor, v_first: torch.Tensor | None) -> tuple[torch.Tensor, torch.Tensor]:
-        x_attn, _, past_key_values, v_first = self.rwkv7(x, v_first=v_first)
-        assert v_first is not None, "v_first should not be None"
-        return x_attn, v_first
+    def forward(
+            self,
+            x: torch.Tensor,
+            v_first: torch.Tensor | None,
+            past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = None
+        ) -> tuple[torch.Tensor, torch.Tensor, tuple[tuple[torch.Tensor, torch.Tensor], ...] | None]:
+        x_attn, _, kv, v_first = self.rwkv7(
+            x, v_first=v_first, past_key_values=past_key_values, use_cache=past_key_values is not None
+        )
+        return x_attn, v_first, kv # type: ignore
 
 
 class CMix(nn.Module):
@@ -410,7 +416,7 @@ class CMix(nn.Module):
         del ddd
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        xx = self.shift1(x)-x
+        xx = self.shift1(x) - x
         k = x+xx * self.x_k
         k = torch.relu(self.key(k)) ** 2
         return self.value(k)
@@ -422,16 +428,20 @@ class RWKV7Block(nn.Module):
         super().__init__()
         self.attn = TMix(dim, block_id, n_blocks)
         self.mlp = CMix(dim, dim * 4, block_id, n_blocks)
-        self.norm1 = nn.LayerNorm(dim)
-        self.norm2 = nn.LayerNorm(dim)
+        self.norm1 = nn.RMSNorm(dim)
+        self.norm2 = nn.RMSNorm(dim)
 
-    def forward(self, x: torch.Tensor, v_first: torch.Tensor | None) -> tuple[torch.Tensor, torch.Tensor]:
-        x_attn, v_first = self.attn(self.norm1(x), v_first=v_first)
-        x = x+x_attn
-        x = x+self.mlp(self.norm2(x))
+    def forward(
+            self,
+            x: torch.Tensor,
+            v_first: torch.Tensor | None,
+            past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = None
+        ) -> tuple[torch.Tensor, torch.Tensor, tuple[tuple[torch.Tensor, torch.Tensor], ...] | None]:
+        x_attn, v_first, kv = self.attn(self.norm1(x), v_first=v_first, past_key_values=past_key_values)
+        x = x + x_attn
+        x = x + self.mlp(self.norm2(x))
         assert v_first is not None, "v_first should not be None"
-        return x, v_first
-
+        return x, v_first, kv
 
 class RWKV7(PreTrainedModel, GenerationMixin):
     """大模型本体"""
@@ -447,20 +457,39 @@ class RWKV7(PreTrainedModel, GenerationMixin):
             for i in range(self.config.n_blocks)
         ])
         self.lm_head = nn.Linear(self.config.dim, self.config.vocab_size)
-        self.norm_in = nn.LayerNorm(self.config.dim)
-        self.norm_out = nn.LayerNorm(self.config.dim)
+        self.norm_in = nn.RMSNorm(self.config.dim)
+        self.norm_out = nn.RMSNorm(self.config.dim)
         self.wte.weight.data.uniform_(-self.config.max_lr, self.config.max_lr)
         nn.init.orthogonal_(self.lm_head.weight, gain=0.5)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor,
+            return_dict: bool = False,
+            past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = None,
+            use_cache=False): ## TODO: 兼容Huggingface Transformers格式
+        key_values: list[tuple[torch.Tensor, torch.Tensor]] = []
         x = self.norm_in(self.wte(x))
         v_first = None
         for block in self.blocks:
-            x, v_first = block(x, v_first)
-        return self.lm_head(self.norm_out(x))
+            x, v_first, kv = block(x, v_first, past_key_values=past_key_values)
+            key_values.append(kv)
+        out = self.lm_head(self.norm_out(x))
+        if not return_dict:
+            return out
+        return CausalLMOutputWithPast(logits=out, past_key_values=tuple(key_values))
 
     def save(self, path: str):
         torch.save(self.state_dict(), path)  # 保存模型参数防止带上不必要的前缀
+
+    def prepare_inputs_for_generation(self, input_ids,
+            past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = None,
+            use_cache=False,
+            token_type_ids=None,
+            attention_mask=None,
+            **kwargs):
+        # 准备输入，用于生成
+        if len(input_ids.shape) == 1:
+            input_ids = input_ids.unsqueeze(0)
+        return {"x": input_ids, "use_cache": use_cache, "past_key_values": past_key_values if use_cache else None}
 
 AutoConfig.register("rwkv7", RWKV7Config)
 AutoModelForCausalLM.register(RWKV7Config, RWKV7)

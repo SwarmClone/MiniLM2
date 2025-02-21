@@ -4,7 +4,8 @@ from tqdm import tqdm
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
-from .model import NGPT, RWKV7
+from transformers import AutoModelForCausalLM, AutoTokenizer # type: ignore
+from .model import *
 from .dataset import PreTrainDataset, collate_fn, from_file
 from .validate import validate
 from . import config
@@ -15,7 +16,6 @@ if __name__ == '__main__':
     import os
     import json
     
-    from tokenizers import Tokenizer # type: ignore
     if len(sys.argv) < 2:
         print('Usage: python -m minilm2.llm.train <config_path>')
         exit(1)
@@ -23,45 +23,48 @@ if __name__ == '__main__':
     config_dir = os.path.dirname(config_path) # 配置文件路径
     train_config = json.load(open(config_path))
 
+    # 根据配置文件创建模型
+    model_type = train_config["model"]
+    print(f"Loading {model_type} model...")
+
     # 加载tokenizer并获取词表大小
     print("Loading tokenizer...")
-    tokenizer = Tokenizer.from_file(os.path.join(config_dir, train_config['tokenizer_path']))
-    vocab_size = tokenizer.get_vocab_size()
+    tokenizer = AutoTokenizer.from_pretrained(os.path.join(config_dir, train_config['tokenizer_path']))
+    vocab_size = len(tokenizer)
     print(f"==> Vocab size: {vocab_size}")
 
     # 根据配置文件创建模型
     model_type = train_config["model"]
     print(f"Loading {model_type} model...")
-    model: torch.nn.Module
     if model_type == "NGPT":
-        model = NGPT(
+        model_config = NGPTConfig(
             vocab_size=vocab_size,
-            dim=train_config['model_dim'],
-            max_length=train_config['max_length'],
-            n_heads=train_config['num_heads'],
-            n_blocks=train_config['num_layers'],
-            dropout=0 # 推理时不使用dropout
+            dim=train_config["model_dim"],
+            n_blocks=train_config["num_layers"],
+            n_heads=train_config["num_heads"],
+            max_position_embeddings=train_config["max_length"],
+            dropout=train_config["dropout"]
         )
     elif model_type == "RWKV7":
-        model = RWKV7(
-            vocab_size=2 ** math.ceil(math.log2(vocab_size)), # 确保vocab_size为2的幂
-            dim=train_config['model_dim'],
-            n_blocks=train_config['num_layers'],
-            max_lr=train_config['max_learning_rate']
+        model_config = RWKV7Config(
+            vocab_size=2 ** math.ceil(math.log2(vocab_size)),
+            dim=train_config["model_dim"],
+            n_blocks=train_config["num_layers"],
+            max_position_embeddings=train_config["max_length"],
+            dropout=train_config["dropout"],
+            max_lr=train_config["max_learning_rate"]
         )
+    model = (AutoModelForCausalLM.from_pretrained(os.path.join(config_dir, train_config['model_path']))
+                if train_config['model_path'] else
+                AutoModelForCausalLM.from_config(model_config))
     # 统计参数量
-    params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    params = sum(p.numel() for p in model.parameters())
     print(f"==> Number of parameters: {params / 1e6:.2f}M")
-    # 加载已有的检查点
-    if train_config['checkpoint_file']:
-        checkpoint_path = os.path.join(config_dir, train_config['checkpoint_file'])
-        print(f"==> Loading checkpoint from {checkpoint_path}, step={train_config['checkpoint_step']}")
-        model.load_state_dict(torch.load(checkpoint_path, weights_only=True))
 
     # 将模型移动到显存并编译以加速训练
     model.to(config.DEVICE)
     print("==> Compiling model...")
-    model.compile()
+    # model.compile()
     model.train()
 
     # 加载数据集
@@ -138,18 +141,19 @@ if __name__ == '__main__':
                         model.train() # 在验证时切换到了推理模式，切换回来
                         print(f'==> Validation loss: {val_loss:.4f}')
                         checkpoint_name = f'checkpoint_{step}_{val_loss:.4f}.pt'
-                        model.save(os.path.join(config_dir, checkpoint_name))
+                        model.save_pretrained(os.path.join(config_dir, checkpoint_name))
                         print(f'==> Saved checkpoint to {checkpoint_name}')
                         open(log_fname, 'a').write(f'VAL,{step},{lr},{val_loss}\n')
 
     except KeyboardInterrupt:
         print('Training interrupted.')
         # 保存未使用的数据集
-        unused_indexes = train_dataset.get_unused_indexes()
+        assert isinstance(train_loader.dataset, PreTrainDataset)
+        used_indexes = train_loader.dataset.get_used_indexes()
         dataset_path = os.path.dirname(os.path.join(config_dir, train_config['dataset_path']))
-        lst_name = os.path.join(dataset_path, f'train{step}.lst')
+        lst_name = os.path.join(dataset_path, f'train{step}_used.lst')
         with open(lst_name, 'w') as f:
-            for i in tqdm(unused_indexes):
+            for i in tqdm(used_indexes):
                 f.write(f'{i}\n')
         print(f"==> Unused indexes saved to {lst_name}")
         print("!! REMEMBER TO UPDATE THE DATASET FILE AND CONFIG FILE TO USE THE UPDATED LIST AND CHECKPOINT !!")
@@ -157,5 +161,5 @@ if __name__ == '__main__':
     finally:
         # 保存最终的检查点
         checkpoint_name = f'checkpoint_{step}.pt'
-        model.save(os.path.join(config_dir, checkpoint_name))
+        model.save_pretrained(os.path.join(config_dir, checkpoint_name))
         print(f'==> Saved checkpoint to {checkpoint_name}')
