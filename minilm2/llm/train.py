@@ -64,7 +64,7 @@ if __name__ == '__main__':
     # 将模型移动到显存并编译以加速训练
     model.to(config.DEVICE)
     print("==> Compiling model...")
-    # model.compile()
+    model.compile()
     model.train()
 
     # 加载数据集

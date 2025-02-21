@@ -31,7 +31,7 @@ class PreTrainDataset(Dataset):
 
     def __getitem__(self, index) -> tuple[torch.Tensor, torch.Tensor]:
         index = index % len(self.unused_indexes) # 确保索引在范围内
-        abs_index = self.unused_indexes.pop(index)
+        abs_index = self.unused_indexes[index]
         line = self.data[abs_index]
         self.used_indexes.add(abs_index)
         x = torch.from_numpy(line[:-1].copy()).type(torch.long) # 复制以防止torch报警告
