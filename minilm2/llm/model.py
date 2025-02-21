@@ -34,7 +34,7 @@ class MiniLM2Tokenizer(PreTrainedTokenizerFast):
         return ''.join(tokens)
     
     def _decode(self, token_ids, **kwargs):
-        return ''.join(self.convert_ids_to_tokens(token_ids))
+        return self.convert_tokens_to_string(self.convert_ids_to_tokens(token_ids))
 
 class RotatoryPositionalEncoding(nn.Module):
     """旋转位置编码"""
@@ -238,8 +238,14 @@ class NGPT(PreTrainedModel, GenerationMixin):
             return_dict: bool = False,
             past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = None,
             use_cache=False):
+        B, T = x.shape
         x = self.wte(x)
         key_values: list[tuple[torch.Tensor, torch.Tensor]] = []
+        cut_idx = T - self.config.max_position_embeddings
+        if cut_idx > 0:
+            x = x[:, cut_idx:]
+            if past_key_values is not None:
+                past_key_values = tuple((k[..., cut_idx:, :], v[..., cut_idx:, :]) for k, v in past_key_values)
         for i in range(self.config.n_blocks):
             block = self.blocks[i]
             if past_key_values is not None:

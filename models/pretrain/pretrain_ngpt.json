@@ -20,7 +20,7 @@
     "top_p": 0.1,
     "temperature": 0.5,
 
-    "checkpoint_file": "checkpoint_20000_2.2971.pt",
+    "model_path": "../transformers/ngpt/pretrain0.4b",
     "checkpoint_step": 20000,
 
     "log_file": "pretrain.log"

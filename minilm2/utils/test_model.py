@@ -1,6 +1,7 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, StoppingCriteriaList, StopStringCriteria # type: ignore
+from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer # type: ignore
 from ..llm import model as llm_model
 from time import time
+from . import config
 
 DEVICE = "cuda"
 
@@ -12,9 +13,9 @@ model = AutoModelForCausalLM.from_pretrained(
 ).to(DEVICE)
 tokenizer = AutoTokenizer.from_pretrained("models/tokenizers/tokenizer32k")
 
-prompt = "向我介绍一下大语言模型。"
+prompt = "你叫什么名字？"
 messages = [
-    {"role": "system", "content": "你是一个名叫MiniLM2的小型语言模型。你是一个助手。"},
+    {"role": "system", "content": "AI是一个名叫MiniLM2的小型语言模型。AI是人类的助手，会回答用户的问题并遵守用户的指令。"},
     {"role": "user", "content": prompt},
 ]
 text = tokenizer.apply_chat_template(
@@ -23,11 +24,12 @@ text = tokenizer.apply_chat_template(
     add_generation_prompt=True,
 )
 model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 
 generated_ids = model.generate(
     **model_inputs,
-    max_new_tokens=100,
-    stopping_criteria=StoppingCriteriaList([StopStringCriteria(tokenizer, ["\n\n\n"])])
+    max_new_tokens=200,
+    streamer=streamer
 )
 generated_ids = [
     output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
