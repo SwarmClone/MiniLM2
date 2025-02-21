@@ -26,11 +26,12 @@
     }
   },
   "bos_token": "<eos>",
-  "clean_up_tokenization_spaces": false,
+  "clean_up_tokenization_spaces": true,
   "eos_token": "<eos>",
   "extra_special_tokens": {},
   "model_max_length": 1000000000000000019884624838656,
   "pad_token": "<pad>",
-  "tokenizer_class": "PreTrainedTokenizerFast",
-  "unk_token": "<unk>"
+  "tokenizer_class": "MiniLM2Tokenizer",
+  "unk_token": "<unk>",
+  "chat_template": "{%- for message in messages %} {%- if message['role'] == 'user' %}  {{- '人类：' + message['content'] + '\n' * 3 }} {%- elif message['role'] == 'system' %}  {{- '系统：' + message['content'] + '\n' * 3 }} {%- elif message['role'] == 'assistant' %}  {{- 'AI：' + message['content'] + '\n' * 3 }} {%- endif %}{%- endfor %}{%- if add_generation_prompt %}AI：{%- endif %}"
 }

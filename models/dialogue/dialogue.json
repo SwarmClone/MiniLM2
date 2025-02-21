@@ -1,6 +1,8 @@
 {
+    "model": "NGPT",
+    
     "dataset_path": "../../datasets/dialogue/dataset.json",
-    "tokenizer_path": "../tokenizer.json",
+    "tokenizer_path": "../tokenizers/tokenizer32k",
     "max_length": 1024,
     "model_dim": 1024,
     "num_heads": 16,
