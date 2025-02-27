@@ -11,9 +11,9 @@ model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype="auto"
 ).to(DEVICE)
-tokenizer = AutoTokenizer.from_pretrained("models/tokenizers/tokenizer32k")
+tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-prompt = "你叫什么名字？"
+prompt = "请向我介绍什么是大语言模型。"
 messages = [
     {"role": "system", "content": "AI是一个名叫MiniLM2的小型语言模型。AI是人类的助手，会回答用户的问题并遵守用户的指令。"},
     {"role": "user", "content": prompt},
