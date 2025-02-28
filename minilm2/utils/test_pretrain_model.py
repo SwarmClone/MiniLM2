@@ -1,11 +1,15 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer # type: ignore
+from transformers import ( # type: ignore
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    TextStreamer
+)
 from ..llm import model as llm_model
 from time import time
 from . import config
 
 DEVICE = "cuda"
 
-model_name = "models/transformers/ngpt/sft0.4b"
+model_name = "models/transformers/ngpt/pretrain0.4b"
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
@@ -13,17 +17,7 @@ model = AutoModelForCausalLM.from_pretrained(
 ).to(DEVICE)
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-prompt = "请向我介绍什么是大语言模型。"
-messages = [
-    {"role": "system", "content": "AI是一个名叫MiniLM2的小型语言模型。AI是人类的助手，会回答用户的问题并遵守用户的指令。"},
-    {"role": "user", "content": prompt},
-]
-text = tokenizer.apply_chat_template(
-    messages,
-    tokenize=False,
-    add_generation_prompt=True,
-)
-model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+model_inputs = tokenizer(["有时候，"], return_tensors="pt").to(model.device)
 streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 
 generated_ids = model.generate(
