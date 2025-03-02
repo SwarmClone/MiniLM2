@@ -3,7 +3,6 @@ from transformers import ( # type: ignore
     AutoModelForCausalLM,
     TextStreamer
 )
-from ..llm import model as llm_model
 from time import time
 from . import config
 
@@ -13,9 +12,10 @@ model_name = "models/transformers/ngpt/pretrain0.4b"
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    torch_dtype="auto"
+    torch_dtype="auto",
+    trust_remote_code=True
 ).to(DEVICE)
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
 model_inputs = tokenizer(["有时候，"], return_tensors="pt").to(model.device)
 streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)

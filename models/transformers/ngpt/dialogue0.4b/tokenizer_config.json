@@ -54424,6 +54424,9 @@
   "model_max_length": 1000000000000000019884624838656,
   "pad_token": "<pad>",
   "tokenizer_class": "MiniLM2Tokenizer",
+  "auto_map": {
+    "AutoTokenizer": [null, "tokenizer_minilm2.MiniLM2Tokenizer"]
+  },
   "unk_token": "<unk>",
   "chat_template": "{%- for message in messages %} {%- if message['role'] == 'user' %}  {{- '人类：' + message['content'] + '\n' * 3 }} {%- elif message['role'] == 'system' %}  {{- '系统：' + message['content'] + '\n' * 3 }} {%- elif message['role'] == 'assistant' %}  {{- 'AI：' + message['content'] + '\n' * 3 }} {%- endif %}{%- endfor %}{%- if add_generation_prompt %}AI：{%- endif %}"
 }

@@ -4,7 +4,7 @@
 
 ## 使用方法
 
-参见[GitHub仓库](https://github.com/SwarmClone/MiniLM2/tree/huggingface)中`minilm2/utils/test_dialogue_model.py`。必须使用仓库中的代码才能正常推理模型，因为此模型架构并未被`Transformers`库支持。
+参见[GitHub仓库](https://github.com/SwarmClone/MiniLM2/tree/huggingface)中`minilm2/utils/test_dialogue_model.py`。因为包含了模型代码，请注意设置`trust_remote_code=True`。
 
 ## 模型输出实例
 
