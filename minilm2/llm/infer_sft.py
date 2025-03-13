@@ -29,6 +29,20 @@ def append_history(history: list[tuple[str, str]], role: str, text: str) -> list
         history[-1] = (history[-1][0], text)
     return history
 
+def load_in_fp16(model, model_path=None):
+    if not model_path:
+        ckpt = os.path.join(config_dir, train_config["checkpoint_file"])
+    else:
+        ckpt = model_path
+    
+    state_dict = torch.load(ckpt)
+    for name, param in model.named_parameters():
+        if name in state_dict.keys():
+            param.data = state_dict[name].to(torch.float16)
+            
+    model.dtype = torch.float16
+    return model
+
 if __name__ == '__main__':
     import sys
     import os
@@ -74,6 +88,8 @@ if __name__ == '__main__':
         checkpoint_path = os.path.join(config_dir, train_config['checkpoint_file'])
         print(f"==> Loading checkpoint from {checkpoint_path}, step={train_config['checkpoint_step']}")
         model.load_state_dict(torch.load(checkpoint_path, weights_only=True))
+
+    model = load_in_fp16(model, checkpoint_path)
 
     # 将模型移动到显存并编译以加速推理
     print(f"==> Using device: {config.DEVICE}")
