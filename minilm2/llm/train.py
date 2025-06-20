@@ -38,7 +38,7 @@ if __name__ == '__main__':
     print(f"Loading {model_type} model...")
     if model_type == "NGPT":
         model_config = NGPTConfig(
-            vocab_size=vocab_size,
+            vocab_size=2 ** math.ceil(math.log2(vocab_size)),
             dim=train_config["model_dim"],
             n_blocks=train_config["num_layers"],
             n_heads=train_config["num_heads"],

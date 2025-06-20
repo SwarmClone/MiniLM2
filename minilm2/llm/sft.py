@@ -1,4 +1,3 @@
-import math
 import warnings
 import time
 import torch
@@ -6,10 +5,9 @@ from tqdm import tqdm
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
-from transformers import AutoModelForCausalLM, AutoTokenizer # type: ignore
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from .model import *
 from .dataset_sft import SFTDataset, collate_fn, from_file
-from .validate import validate
 from . import config
 from .lr_schedule import get_lr_schedule
 from .muon import Muon
