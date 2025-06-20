@@ -220,7 +220,10 @@ class NGPT(PreTrainedModel, GenerationMixin):
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)
         self.config = config
-        self.wte = nn.Embedding(self.config.vocab_size, self.config.dim)
+        self.wte = nn.Embedding(
+            2 ** math.ceil(math.log2(self.config.vocab_size)),
+            self.config.dim
+        )
         self.blocks = nn.ModuleList([
             NGPTBlock(
                 self.config.dim,
@@ -402,7 +405,10 @@ class GPT(PreTrainedModel, GenerationMixin):
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)
         self.config = config
-        self.wte = nn.Embedding(self.config.vocab_size, self.config.dim)
+        self.wte = nn.Embedding(
+            2 ** math.ceil(math.log2(self.config.vocab_size)),
+            self.config.dim
+        )
         self.blocks = nn.ModuleList([
             GPTBlock(
                 self.config.dim,
