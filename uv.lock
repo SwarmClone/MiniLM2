@@ -212,6 +212,11 @@ wheels = [
 ]
 
 [[package]]
+name = "flash-muon"
+version = "0.1.0"
+source = { git = "https://github.com/nil0x9/flash-muon#80ac87fb49afc792b84eccb393d051b1ed8eee32" }
+
+[[package]]
 name = "fonttools"
 version = "4.58.4"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
@@ -606,6 +611,7 @@ name = "minilm2"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "flash-muon" },
     { name = "ipython", version = "8.37.0", source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }, marker = "python_full_version < '3.11'" },
     { name = "ipython", version = "9.3.0", source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }, marker = "python_full_version >= '3.11'" },
     { name = "matplotlib" },
@@ -619,6 +625,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "flash-muon", git = "https://github.com/nil0x9/flash-muon" },
     { name = "ipython", specifier = ">=8.37.0" },
     { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "numpy", specifier = ">=2.2.6" },
