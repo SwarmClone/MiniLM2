@@ -36,7 +36,7 @@ class MiniLM2Tokenizer(PreTrainedTokenizerFast):
     def _decode(self, token_ids, **kwargs):
         return self.convert_tokens_to_string(self.convert_ids_to_tokens(token_ids))
 
-class RotatoryPositionalEncoding(nn.Module):
+class RotaryPositionEncoding(nn.Module):
     """旋转位置编码"""
 
     def __init__(self, dim: int, max_length: int):
@@ -114,7 +114,7 @@ class NormalizedCausalSelfAttention(nn.Module):
         self.k_proj = nn.Linear(dim, dim, bias=False)
         self.v_proj = nn.Linear(dim, dim, bias=False)
         self.o_proj = nn.Linear(dim, dim, bias=False)
-        self.pe = RotatoryPositionalEncoding(self.head_dim, max_length)
+        self.pe = RotaryPositionEncoding(self.head_dim, max_length)
         self.dropout = dropout
         self.max_length = max_length
 
@@ -332,7 +332,7 @@ class CausalSelfAttention(nn.Module):
         self.o_proj = nn.Linear(dim, dim, bias=False)
         self.q_norm = nn.RMSNorm(self.head_dim)
         self.k_norm = nn.RMSNorm(self.head_dim)
-        self.pe = RotatoryPositionalEncoding(self.head_dim, max_length)
+        self.pe = RotaryPositionEncoding(self.head_dim, max_length)
         self.dropout = dropout
         self.max_length = max_length
 
