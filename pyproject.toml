@@ -1,0 +1,19 @@
+[project]
+name = "minilm2"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "ipython>=8.37.0",
+    "matplotlib>=3.10.3",
+    "numpy>=2.2.6",
+    "tokenizers>=0.21.1",
+    "torch",
+    "tqdm>=4.67.1",
+    "transformers>=4.52.4",
+]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://mirrors.aliyun.com/pytorch-wheels/"
