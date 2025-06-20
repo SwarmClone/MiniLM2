@@ -1,18 +1,17 @@
-from typing import Optional
 from torch.utils.data import Dataset
 import torch
 import numpy as np
 import json
 import os
 
-class SFTDataset(Dataset):
+class SFTDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
     def __init__(
             self,
             data_path: str,
             mask_path: str,
             max_length: int,
-            subset_indexes: Optional[list[int]] = None,
-            used_indexes: Optional[list[int]] = None):
+            subset_indexes: list[int] | None = None,
+            used_indexes: list[int] | None = None):
         self.data_path = data_path
         self.mask_path = mask_path
         self.max_length = max_length
@@ -35,7 +34,7 @@ class SFTDataset(Dataset):
     def __len__(self) -> int:
         return len(self.unused_indexes) # 返回未使用的行数
 
-    def __getitem__(self, index) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         index = index % len(self) # 确保索引在范围内
         abs_index = self.unused_indexes[index]
         line = self.data[abs_index]
@@ -56,18 +55,20 @@ def collate_fn(batch: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]) -> 
     return x, y, m
 
 def from_file(config_path: str, max_lenth: int) -> SFTDataset: # SFT不需要验证集
-    # 根据配置文件读取数据集数据
-    # 配置文件实例：
-    # {
-    #     "?path": "数据集本体相对路径",
-    #     "path": "dataset.bin",
-    #     "?mask_path": "掩码文件相对路径",
-    #     "mask_path": "mask.bin",
-    #     "?train": "训练集索引文件相对路径",
-    #     "train": "train.lst",
-    #     "?train_used": "训练集已用数据索引文件相对路径",
-    #     "train_used": "train_used.lst"
-    # }
+    """
+    根据配置文件读取数据集数据
+    配置文件实例：
+    {
+        "?path": "数据集本体相对路径",
+        "path": "dataset.bin",
+        "?mask_path": "掩码文件相对路径",
+        "mask_path": "mask.bin",
+        "?train": "训练集索引文件相对路径",
+        "train": "train.lst",
+        "?train_used": "训练集已用数据索引文件相对路径",
+        "train_used": "train_used.lst"
+    }
+    """
     config = json.load(open(config_path))
     dir_path = os.path.dirname(config_path)
     path = os.path.join(dir_path, config["path"])
