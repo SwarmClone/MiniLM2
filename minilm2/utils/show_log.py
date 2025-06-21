@@ -1,6 +1,19 @@
+from typing import Literal
 from matplotlib import pyplot as plt
 
-def load_log(lines: list[str]) -> tuple[list[float], list[float], list[float], list[float], list[int], list[int], list[float], list[float]]:
+LabelType = (
+    Literal['losses'] |
+    Literal['lrs'] |
+    Literal['steps'] |
+    Literal['timestamps'] |
+    Literal['grad_norms'] |
+    Literal['val_losses'] |
+    Literal['val_steps'] |
+    Literal['val_timestamps']
+)
+LogType = dict[LabelType, list[float] | list[int]]
+
+def load_log(lines: list[str]) -> LogType:
     losses: list[float] = []
     grad_norms: list[float] = []
     timestamps: list[float] = []
@@ -18,6 +31,9 @@ def load_log(lines: list[str]) -> tuple[list[float], list[float], list[float], l
             grad_norm = "0.0"
         elif len(d) == 6:
             loss_type, step, lr, loss, time, grad_norm = d
+        else:
+            print(f"Invalid line: {line}")
+            continue
         if t0 is None:
             t0 = float(time)
         if loss_type in ("TRAIN", "SFT"):
@@ -31,7 +47,17 @@ def load_log(lines: list[str]) -> tuple[list[float], list[float], list[float], l
             val_steps.append(int(step))
             val_timestamps.append(timestamps[-1])
             t0 += float(time) - t0 - timestamps[-1]
-    return losses, grad_norms, val_losses, lrs, steps, val_steps, timestamps, val_timestamps
+    res: LogType = {
+        'losses': losses,
+        'steps': steps,
+        'timestamps': timestamps,
+        'val_losses': val_losses,
+        'val_steps': val_steps,
+        'val_timestamps': val_timestamps,
+        'lrs': lrs,
+        'grad_norms': grad_norms,
+    }
+    return res
 
 if __name__ == '__main__':
     import sys
@@ -41,7 +67,16 @@ if __name__ == '__main__':
     log_file = sys.argv[1]
     with open(log_file, 'r') as f:
         lines = f.readlines()
-    losses, grad_norms, val_losses, lrs, steps, val_steps, timestamps, val_timestamps = load_log(lines)
+    log = load_log(lines)
+    steps = log['steps']
+    losses = log['losses']
+    val_steps = log['val_steps']
+    val_losses = log['val_losses']
+    grad_norms = log['grad_norms']
+    timestamps = log['timestamps']
+    val_timestamps = log['val_timestamps']
+    lrs = log['lrs']
+
     plt.plot(steps, losses, label="train loss")
     plt.plot(val_steps, val_losses, label="val loss")
     plt.plot(steps, grad_norms, label="grad norm")
