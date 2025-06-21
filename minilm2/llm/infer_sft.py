@@ -13,6 +13,8 @@ from transformers import ( # type: ignore
 from .model import *
 from . import config
 
+##!TODO: 使用混合精度训练
+
 if __name__ == '__main__':
     import sys
     import os

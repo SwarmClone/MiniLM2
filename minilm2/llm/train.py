@@ -6,6 +6,7 @@ from tqdm import tqdm
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
+from torch.amp import autocast, GradScaler
 from transformers import AutoModelForCausalLM, AutoTokenizer # type: ignore
 from .model import *
 from .dataset import PreTrainDataset, collate_fn, from_file
@@ -65,8 +66,7 @@ if __name__ == '__main__':
 
     # 将模型移动到显存并编译以加速训练
     model.to(config.DEVICE)
-    if train_config["bfloat16"]:
-        model.bfloat16()
+    scaler = GradScaler(enabled=train_config['bfloat16']) # 如果启用bfloat16则启用混合精度训练
     print("==> Compiling model...")
     model.compile()
     model.train()
@@ -142,6 +142,7 @@ if __name__ == '__main__':
             for x, y in pbar:
                 # 一个step的开始，更新学习率
                 if micro_step % train_config["n_batches_per_step"] == 0:
+                    total_loss = 0.0
                     optimizer.zero_grad()
                     lr = lr_schedule(step)
                     for param_group in optimizer.param_groups:
@@ -150,28 +151,36 @@ if __name__ == '__main__':
 
                 x = x.to(config.DEVICE)
                 y = y.to(config.DEVICE)
-                logits = model(x)
-                loss = F.cross_entropy(
-                    logits.view(-1, logits.size(-1)),
-                    y.view(-1),
-                    reduction='mean',
-                    ignore_index=config.SPECIAL_TOKENS["<pad>"]
-                ) / train_config['n_batches_per_step']
-                del x, y, logits # 释放显存
-                loss.backward() # 反向传播积累梯度
+                with autocast(
+                        "cuda",
+                        dtype=torch.bfloat16,
+                        enabled=train_config["bfloat16"] # 启用bfloat16则使用混合精度训练
+                    ):
+                    logits = model(x)
+                    loss = F.cross_entropy(
+                        logits.view(-1, logits.size(-1)),
+                        y.view(-1),
+                        reduction='mean',
+                        ignore_index=config.SPECIAL_TOKENS["<pad>"]
+                    ) / train_config['n_batches_per_step']
+                scaler.scale(loss).backward() # 反向传播积累梯度，使用缩放来避免精度损失
                 total_loss += loss.item()
                 pbar.set_description(f'loss: {loss.item() * train_config["n_batches_per_step"]:.4f} lr: {lr:.4f}')
 
                 # 一个step的结束，更新参数并保存日志
                 if micro_step % train_config['n_batches_per_step'] == 0:
                     step += 1
+                    # 梯度裁剪保证训练稳定
+                    scaler.unscale_(optimizer) # 将梯度去缩放回原始大小防止梯度裁剪错误
                     grad_norm = nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    optimizer.step()
+                    # 优化器更新参数
+                    scaler.step(optimizer)
                     if model_type == "NGPT":
                         model.normalize() # NGPT需要在每个训练步进行参数归一化
+                    # 更新缩放系数
+                    scaler.update()
+                    # 保存日志
                     open(log_fname, 'a').write(f'TRAIN,{step},{lr},{total_loss},{time.time()},{grad_norm}\n')
-                    total_loss = 0.0
-
                     # 定期进行验证并保存检查点
                     if step % train_config["validation_interval"] == 0:
                         print('==> Validating...')
