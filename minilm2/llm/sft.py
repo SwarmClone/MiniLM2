@@ -115,7 +115,6 @@ if __name__ == '__main__':
     )
 
     micro_step = 0
-    lr = 0
     step = train_config['checkpoint_step']
     total_loss = 0.0
     print("Start training...")

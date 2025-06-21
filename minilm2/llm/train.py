@@ -46,6 +46,15 @@ if __name__ == '__main__':
             max_position_embeddings=train_config["max_length"],
             dropout=train_config["dropout"]
         )
+    elif model_type == "RWKV7":
+        model_config = RWKV7Config(
+            vocab_size=2 ** math.ceil(math.log2(vocab_size)),
+            dim=train_config["model_dim"],
+            n_blocks=train_config["num_layers"],
+            max_position_embeddings=train_config["max_length"],
+            dropout=train_config["dropout"],
+            max_lr=train_config["max_learning_rate"]
+        )
     elif model_type == "gpt":
         model_config = GPTConfig(
             vocab_size=2 ** math.ceil(math.log2(vocab_size)),
@@ -55,8 +64,6 @@ if __name__ == '__main__':
             max_position_embeddings=train_config["max_length"],
             dropout=train_config["dropout"]
         )
-    else:
-        raise ValueError(f"Unknown model type: {model_type}")
     model = (AutoModelForCausalLM.from_pretrained(os.path.join(config_dir, train_config['model_path']))
                 if train_config['model_path'] else
                 AutoModelForCausalLM.from_config(model_config))
@@ -130,7 +137,6 @@ if __name__ == '__main__':
     )
 
     micro_step = 0
-    lr = 0
     step = train_config['checkpoint_step']
     total_loss = 0.0
     print("Start training...")
