@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "flash-linear-attention",
     "flash-muon",
     "ipykernel>=6.29.5",
     "ipython>=8.37.0",
@@ -22,3 +23,4 @@ url = "https://mirrors.aliyun.com/pytorch-wheels/"
 
 [tool.uv.sources]
 flash-muon = { git = "https://github.com/nil0x9/flash-muon" }
+flash-linear-attention = { git = "https://github.com/fla-org/flash-linear-attention" }
