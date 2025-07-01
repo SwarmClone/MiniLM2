@@ -100,35 +100,68 @@ if __name__ == '__main__':
     )
 
     # 定义优化器
+    optimizers_with_lrscale: list[tuple[optim.Optimizer, float]] = []
     if train_config['optimizer'] == 'adamw':
-        optimizer: optim.Optimizer = optim.AdamW(
-            model.parameters(),
-            fused=True,
-            betas=tuple(train_config['betas']),
-            weight_decay=train_config['weight_decay']
-        )
+        optimizers_with_lrscale.append((
+            optim.AdamW(
+                model.parameters(),
+                fused=True,
+                betas=tuple(train_config['betas']),
+                weight_decay=train_config['weight_decay']
+            ),
+            1.0
+        ))
     elif train_config['optimizer'] == 'muon':
         muon_params_dict = {
             n: p for n, p in model.named_parameters()
             if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n
         }
+        muon_params_dict_2x = {
+            n: p for n, p in muon_params_dict.items()
+            if 'w_lora' in n
+        }
+        muon_params_dict_1x = {
+            n: p for n, p in muon_params_dict.items()
+            if 'w_lora' not in n
+        }
         adam_params_dict = {
             n: p for n, p in model.named_parameters()
             if n not in muon_params_dict
         }
-        optimizer = Muon(
-            muon_params=muon_params_dict.values(),
-            adamw_params=adam_params_dict.values(),
-            wd=train_config['weight_decay'],
-            adamw_betas=tuple(train_config['betas'])
-        )
+        optimizers_with_lrscale.append((
+            Muon(
+                muon_params=muon_params_dict_1x.values(),
+                wd=train_config['weight_decay'],
+                adamw_betas=tuple(train_config['betas'])
+            ),
+            1.0
+        ))
+        optimizers_with_lrscale.append((
+            Muon(
+                muon_params=muon_params_dict_2x.values(),
+                wd=train_config['weight_decay'],
+                adamw_betas=tuple(train_config['betas'])
+            ),
+            2.0
+        ))
+        optimizers_with_lrscale.append((
+            optim.AdamW(
+                adam_params_dict.values(),
+                weight_decay=train_config['weight_decay'],
+                betas=tuple(train_config['betas']),
+                fused=True
+            ),
+            1.0
+        ))
     else:
         raise ValueError(f"Unsupported optimizer: {train_config['optimizer']}")
     # 如果有的话，加载优化器状态
     if train_config['optimizer_state_path']:
         optimizer_state_path = os.path.join(config_dir, train_config['optimizer_state_path'])
         print(f"==> Loading optimizer state from {optimizer_state_path}")
-        optimizer.load_state_dict(torch.load(optimizer_state_path, weights_only=True))
+        state_dict_all = torch.load(optimizer_state_path, weights_only=True)
+        for i, state_dict in state_dict_all.items():
+            optimizers_with_lrscale[i][0].load_state_dict(state_dict)
 
     # 定义学习率衰减策略
     lr_schedule = get_lr_schedule(
@@ -152,10 +185,11 @@ if __name__ == '__main__':
                 # 一个step的开始，更新学习率
                 if micro_step % train_config["n_batches_per_step"] == 0:
                     total_loss = 0.0
-                    optimizer.zero_grad()
-                    lr = lr_schedule(step)
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] = lr
+                    for optimizer, lr_scale in optimizers_with_lrscale:
+                        optimizer.zero_grad()
+                        lr = lr_schedule(step)
+                        for param_group in optimizer.param_groups:
+                            param_group['lr'] = lr * lr_scale
                 micro_step += 1
 
                 x = x.to(config.DEVICE)
@@ -180,10 +214,12 @@ if __name__ == '__main__':
                 if micro_step % train_config['n_batches_per_step'] == 0:
                     step += 1
                     # 梯度裁剪保证训练稳定
-                    scaler.unscale_(optimizer) # 将梯度去缩放回原始大小防止梯度裁剪错误
+                    for optimizer, _ in optimizers_with_lrscale:
+                        scaler.unscale_(optimizer) # 将梯度去缩放回原始大小防止梯度裁剪错误
                     grad_norm = nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                     # 优化器更新参数
-                    scaler.step(optimizer)
+                    for optimizer, _ in optimizers_with_lrscale:
+                        scaler.step(optimizer)
                     if model_type == "NGPT":
                         model.normalize() # NGPT需要在每个训练步进行参数归一化
                     # 更新缩放系数
@@ -213,8 +249,11 @@ if __name__ == '__main__':
             for i in tqdm(used_indexes):
                 f.write(f'{i}\n')
         print(f"==> Unused indexes saved to {lst_name}")
-        optimizer_state = optimizer.state_dict()
-        torch.save(optimizer_state, os.path.join(config_dir, f'optimizer_{step}.pt'))
+        state_dict_full = {}
+        for i, (optimizer, _) in enumerate(optimizers_with_lrscale):
+            optimizer_state = optimizer.state_dict()
+            state_dict_full[i] = optimizer_state
+        torch.save(state_dict_full, os.path.join(config_dir, f'optimizer_{step}.pt'))
         print(f"==> Optimizer state saved to {os.path.join(config_dir, f'optimizer_{step}.pt')}")
         print("!! REMEMBER TO UPDATE THE DATASET FILE AND CONFIG FILE TO USE THE UPDATED LIST AND CHECKPOINT !!")
 
