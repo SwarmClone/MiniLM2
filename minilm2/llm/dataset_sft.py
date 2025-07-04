@@ -105,7 +105,7 @@ if __name__ == '__main__':
                 print("\033[31m", end="")
             else:
                 print("\033[0m", end="")
-            print(tokenizer.convert_ids_to_tokens([x[0][i].item()])[0], end="")
+            print(tokenizer.convert_ids_to_tokens([y[0][i].item()])[0], end="")
         try:
             input()
         except EOFError:

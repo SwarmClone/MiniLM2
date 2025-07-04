@@ -5,6 +5,7 @@ from tqdm import tqdm
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
+from torch.amp import autocast, GradScaler
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from .model import *
 from .dataset_sft import SFTDataset, collate_fn, from_file
@@ -48,8 +49,7 @@ if __name__ == '__main__':
 
     # 将模型移动到显存并编译以加速训练
     model.to(config.DEVICE)
-    if train_config["bfloat16"]:
-        model.bfloat16()
+    scaler = GradScaler(enabled=train_config['bfloat16']) # 如果启用bfloat16则启用混合精度训练
     print("==> Compiling model...")
     model.compile()
     model.train()
@@ -74,37 +74,68 @@ if __name__ == '__main__':
     )
 
     # 定义优化器
+    optimizers_with_lrscale: list[tuple[optim.Optimizer, float]] = []
     if train_config['optimizer'] == 'adamw':
-        optimizer: optim.Optimizer = optim.AdamW(
-            model.parameters(),
-            fused=True,
-            betas=tuple(train_config['betas']),
-            weight_decay=train_config['weight_decay']
-        )
+        optimizers_with_lrscale.append((
+            optim.AdamW(
+                model.parameters(),
+                fused=True,
+                betas=tuple(train_config['betas']),
+                weight_decay=train_config['weight_decay']
+            ),
+            1.0
+        ))
     elif train_config['optimizer'] == 'muon':
         muon_params_dict = {
             n: p for n, p in model.named_parameters()
-            # ngpt中会出现如[1, 1, 1, 768]形状的参数，需要squeeze提取有效维度数量
-            # muon适合处理矩阵参数而不是向量参数
-            if p.squeeze().ndim == 2 and 'wte' not in n and 'lm_head' not in n
+            if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n
+        }
+        muon_params_dict_2x = {
+            n: p for n, p in muon_params_dict.items()
+            if 'w_lora' in n
+        }
+        muon_params_dict_1x = {
+            n: p for n, p in muon_params_dict.items()
+            if 'w_lora' not in n
         }
         adam_params_dict = {
             n: p for n, p in model.named_parameters()
             if n not in muon_params_dict
         }
-        optimizer = Muon(
-            muon_params=muon_params_dict.values(),
-            adamw_params=adam_params_dict.values(),
-            wd=train_config['weight_decay'],
-            adamw_betas=tuple(train_config['betas'])
-        )
+        optimizers_with_lrscale.append((
+            Muon(
+                muon_params=muon_params_dict_1x.values(),
+                wd=train_config['weight_decay'],
+                adamw_betas=tuple(train_config['betas'])
+            ),
+            1.0
+        ))
+        optimizers_with_lrscale.append((
+            Muon(
+                muon_params=muon_params_dict_2x.values(),
+                wd=train_config['weight_decay'],
+                adamw_betas=tuple(train_config['betas'])
+            ),
+            2.0
+        ))
+        optimizers_with_lrscale.append((
+            optim.AdamW(
+                adam_params_dict.values(),
+                weight_decay=train_config['weight_decay'],
+                betas=tuple(train_config['betas']),
+                fused=True
+            ),
+            1.0
+        ))
     else:
         raise ValueError(f"Unsupported optimizer: {train_config['optimizer']}")
     # 如果有的话，加载优化器状态
     if train_config['optimizer_state_path']:
         optimizer_state_path = os.path.join(config_dir, train_config['optimizer_state_path'])
         print(f"==> Loading optimizer state from {optimizer_state_path}")
-        optimizer.load_state_dict(torch.load(optimizer_state_path, weights_only=True))
+        state_dict_all = torch.load(optimizer_state_path, weights_only=True)
+        for i, state_dict in state_dict_all.items():
+            optimizers_with_lrscale[i][0].load_state_dict(state_dict)
 
     # 定义学习率衰减策略
     lr_schedule = get_lr_schedule(
@@ -115,6 +146,7 @@ if __name__ == '__main__':
     )
 
     micro_step = 0
+    lr = 0
     step = train_config['checkpoint_step']
     total_loss = 0.0
     print("Start training...")
@@ -124,42 +156,53 @@ if __name__ == '__main__':
     try:
         with tqdm(train_loader) as pbar:
             for x, y, m in pbar:
-                # if m.sum() <= 10:
-                #     continue # 跳过有效长度小于等于10的batch
                 # 一个step的开始，更新学习率
                 if micro_step % train_config["n_batches_per_step"] == 0:
-                    optimizer.zero_grad()
-                    lr = lr_schedule(step)
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] = lr
+                    total_loss = 0.0
+                    for optimizer, lr_scale in optimizers_with_lrscale:
+                        optimizer.zero_grad()
+                        lr = lr_schedule(step)
+                        for param_group in optimizer.param_groups:
+                            param_group['lr'] = lr * lr_scale
                 micro_step += 1
 
                 x = x.to(config.DEVICE)
                 y = y.to(config.DEVICE)
                 m = m.to(config.DEVICE)
-                logits = model(x)
-                loss = (F.cross_entropy(
-                    logits.view(-1, logits.size(-1)),
-                    y.view(-1),
-                    reduction="none",
-                    ignore_index=config.SPECIAL_TOKENS["<pad>"]
-                ) * m.view(-1)).sum() / m.sum() / train_config['n_batches_per_step']
-                del x, y, m, logits # 释放显存
-                loss.backward() # 反向传播积累梯度
+                with autocast(
+                        "cuda",
+                        dtype=torch.bfloat16,
+                        enabled=train_config["bfloat16"] # 启用bfloat16则使用混合精度训练
+                    ):
+                    logits = model(x)
+                    loss = (F.cross_entropy(
+                        logits.view(-1, logits.size(-1)),
+                        y.view(-1),
+                        reduction="none",
+                        ignore_index=config.SPECIAL_TOKENS["<pad>"]
+                    ) * m.view(-1)).sum() / m.sum() / train_config['n_batches_per_step']
+                    del x, y, m, logits # 释放显存
+                scaler.scale(loss).backward() # 反向传播积累梯度，使用缩放来避免精度损失
                 total_loss += loss.item()
                 pbar.set_description(f'loss: {loss.item() * train_config["n_batches_per_step"]:.4f} lr: {lr:.4f}')
 
                 # 一个step的结束，更新参数并保存日志
                 if micro_step % train_config['n_batches_per_step'] == 0:
                     step += 1
+                    # 梯度裁剪保证训练稳定
+                    for optimizer, _ in optimizers_with_lrscale:
+                        scaler.unscale_(optimizer) # 将梯度去缩放回原始大小防止梯度裁剪错误
                     grad_norm = nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    optimizer.step()
+                    # 优化器更新参数
+                    for optimizer, _ in optimizers_with_lrscale:
+                        scaler.step(optimizer)
                     if model_type == "NGPT":
                         model.normalize() # NGPT需要在每个训练步进行参数归一化
-                    open(log_fname, 'a').write(f'SFT,{step},{lr},{total_loss},{time.time()},{grad_norm}\n')
-                    total_loss = 0.0
-
-                    # SFT不需要验证，直接保存
+                    # 更新缩放系数
+                    scaler.update()
+                    # 保存日志
+                    open(log_fname, 'a').write(f'TRAIN,{step},{lr},{total_loss},{time.time()},{grad_norm}\n')
+                    # 定期进行验证并保存检查点
                     if step % train_config["validation_interval"] == 0:
                         checkpoint_name = f'checkpoint_{step}_{total_loss:.4f}'
                         model.save_pretrained(os.path.join(config_dir, checkpoint_name))
@@ -177,8 +220,11 @@ if __name__ == '__main__':
             for i in tqdm(used_indexes):
                 f.write(f'{i}\n')
         print(f"==> Unused indexes saved to {lst_name}")
-        optimizer_state = optimizer.state_dict()
-        torch.save(optimizer_state, os.path.join(config_dir, f'optimizer_{step}.pt'))
+        state_dict_full = {}
+        for i, (optimizer, _) in enumerate(optimizers_with_lrscale):
+            optimizer_state = optimizer.state_dict()
+            state_dict_full[i] = optimizer_state
+        torch.save(state_dict_full, os.path.join(config_dir, f'optimizer_{step}.pt'))
         print(f"==> Optimizer state saved to {os.path.join(config_dir, f'optimizer_{step}.pt')}")
         print("!! REMEMBER TO UPDATE THE DATASET FILE AND CONFIG FILE TO USE THE UPDATED LIST AND CHECKPOINT !!")
 
