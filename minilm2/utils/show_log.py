@@ -31,6 +31,10 @@ def load_log(lines: list[str]) -> LogType:
             grad_norm = "0.0"
         elif len(d) == 6:
             loss_type, step, lr, loss, time, grad_norm = d
+        elif len(d) == 4:
+            loss_type, step, lr, loss = d
+            time = step
+            grad_norm = "0.0"
         else:
             print(f"Invalid line: {line}")
             continue
