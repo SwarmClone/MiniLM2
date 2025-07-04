@@ -7,7 +7,7 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
 from torch.amp import autocast, GradScaler
-from transformers import AutoModelForCausalLM, AutoTokenizer # type: ignore
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from .model import *
 from .dataset import PreTrainDataset, collate_fn, from_file
 from .validate import validate
