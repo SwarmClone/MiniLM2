@@ -10,6 +10,7 @@ dependencies = [
     "ipykernel>=6.29.5",
     "ipython>=8.37.0",
     "matplotlib>=3.10.3",
+    "modelscope>=1.27.1",
     "numpy>=2.2.6",
     "tokenizers>=0.21.1",
     "torch",
