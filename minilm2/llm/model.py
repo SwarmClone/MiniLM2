@@ -36,7 +36,7 @@ class MiniLM2Tokenizer(PreTrainedTokenizerFast):
     def _decode(self, token_ids, **kwargs):
         return self.convert_tokens_to_string(self.convert_ids_to_tokens(token_ids))
 
-class RotaryPositionEncoding(nn.Module):
+class RotaryPositionEmbedding(nn.Module):
     """旋转位置编码"""
 
     def __init__(self, dim: int, max_length: int):
@@ -101,7 +101,6 @@ class NormalizedMLP(nn.Module):
         self.v_proj.weight.data.copy_(normalize(self.v_proj.weight.data))
         self.o_proj.weight.data.copy_(normalize(self.o_proj.weight.data, 0))
 
-
 class NormalizedCausalSelfAttention(nn.Module):
     """带因果关系的多头自注意力，使用Flash Attention和RoPE"""
 
@@ -114,7 +113,7 @@ class NormalizedCausalSelfAttention(nn.Module):
         self.k_proj = nn.Linear(dim, dim, bias=False)
         self.v_proj = nn.Linear(dim, dim, bias=False)
         self.o_proj = nn.Linear(dim, dim, bias=False)
-        self.pe = RotaryPositionEncoding(self.head_dim, max_length)
+        self.pe = RotaryPositionEmbedding(self.head_dim, max_length)
         self.dropout = dropout
         self.max_length = max_length
 
@@ -180,7 +179,6 @@ class NormalizedCausalSelfAttention(nn.Module):
         self.k_proj.weight.data.copy_(normalize(self.k_proj.weight.data))
         self.v_proj.weight.data.copy_(normalize(self.v_proj.weight.data))
         self.o_proj.weight.data.copy_(normalize(self.o_proj.weight.data, 0))
-
 
 class NGPTBlock(nn.Module):
     """一个Decoder块"""
@@ -336,7 +334,6 @@ class TMix(nn.Module):
         )
         return x_attn, v_first, kv # type: ignore
 
-
 class CMix(nn.Module):
     def __init__(self, dim: int, hidden_dim: int, block_id: int, n_blocks: int):
         super().__init__()
@@ -362,7 +359,6 @@ class CMix(nn.Module):
         k = x+xx * self.x_k
         k = torch.relu(self.key(k)) ** 2
         return self.value(k)
-
 
 class RWKV7Block(nn.Module):
     """一个Decoder块"""
@@ -476,7 +472,7 @@ class CausalSelfAttention(nn.Module):
         self.o_proj = nn.Linear(dim, dim, bias=False)
         self.q_norm = nn.RMSNorm(self.head_dim)
         self.k_norm = nn.RMSNorm(self.head_dim)
-        self.pe = RotaryPositionEncoding(self.head_dim, max_length)
+        self.pe = RotaryPositionEmbedding(self.head_dim, max_length)
         self.dropout = dropout
         self.max_length = max_length
 

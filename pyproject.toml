@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "flash-linear-attention",
     "flash-muon",
+    "ijson>=3.4.0",
     "ipykernel>=6.29.5",
     "ipython>=8.37.0",
     "matplotlib>=3.10.3",
