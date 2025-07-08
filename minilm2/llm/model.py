@@ -395,8 +395,8 @@ class RWKV7(PreTrainedModel, GenerationMixin):
             for i in range(self.config.n_blocks)
         ])
         self.lm_head = nn.Linear(self.config.dim, self.config.vocab_size)
-        self.norm_in = nn.RMSNorm(self.config.dim)
-        self.norm_out = nn.RMSNorm(self.config.dim)
+        self.norm_in = nn.LayerNorm(self.config.dim)
+        self.norm_out = nn.LayerNorm(self.config.dim)
         self.wte.weight.data.uniform_(-self.config.max_lr, self.config.max_lr)
         nn.init.orthogonal_(self.lm_head.weight, gain=0.5)
 
