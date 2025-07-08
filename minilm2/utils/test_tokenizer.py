@@ -1,6 +1,6 @@
-from transformers import AutoTokenizer # type: ignore
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-def test_tokenizer(tokenizer: AutoTokenizer):
+def test_tokenizer(tokenizer: PreTrainedTokenizerBase):
     def _wrap(text: str):
         ids = tokenizer.encode(text)
         print(ids)
