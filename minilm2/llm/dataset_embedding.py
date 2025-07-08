@@ -39,7 +39,7 @@ def collate_fn(batch: list[tuple[torch.Tensor, torch.Tensor]]):
 if __name__ == '__main__':
     import sys
     from torch.utils.data import DataLoader
-    from transformers import AutoTokenizer # type: ignore
+    from transformers import AutoTokenizer
     if len(sys.argv) < 3:
         print("Usage: python -m minilm2.llm.dataset_embedding <tokenizer_path> <data_path>")
         exit(1)

@@ -2,7 +2,7 @@ import math
 import torch
 from torch import nn
 import torch.nn.functional as F
-from transformers import ( # type: ignore
+from transformers import (
     PreTrainedModel,
     PretrainedConfig,
     AutoConfig,
@@ -11,7 +11,7 @@ from transformers import ( # type: ignore
     PreTrainedTokenizerFast,
     AutoTokenizer
 )
-from transformers.modeling_outputs import CausalLMOutputWithPast # type: ignore
+from transformers.modeling_outputs import CausalLMOutputWithPast
 
 # nGPT
 normalize = lambda x, dim=-1: F.normalize(x, p=2, dim=dim)
@@ -43,7 +43,7 @@ class RotaryPositionEmbedding(nn.Module):
         super().__init__()
         assert dim % 2 == 0
         positions = torch.arange(0, max_length, 1)
-        theta = 1 / 10000 ** (torch.arange(0, dim, 2) / dim)  # thetai = 1/10000^(2i/dim)
+        theta = 1 / 50000 ** (torch.arange(0, dim, 2) / dim)  # thetai = 1/10000^(2i/dim)
         """
             theta0  theta1  theta2  theta3 ... theta(dim/2-1)
         m=0 0theta0 0theta1 0theta2 0theta3
@@ -63,8 +63,8 @@ class RotaryPositionEmbedding(nn.Module):
     def forward(self, x: torch.Tensor, *, offset: int = 0) -> torch.Tensor:
         x_real = x[..., :self.dim // 2]  # (x.size(-2), dim//2)
         x_imag = x[..., self.dim // 2:]
-        pos_cos = self.positions_cos[offset:offset + x.size(-2)] # type: ignore # (x.size(-2), dim//2)
-        pos_sin = self.positions_sin[offset:offset + x.size(-2)] # type: ignore
+        pos_cos = self.positions_cos[offset:offset + x.size(-2)] # (x.size(-2), dim//2)
+        pos_sin = self.positions_sin[offset:offset + x.size(-2)]
         y_real = x_real * pos_cos - x_imag * pos_sin
         y_imag = x_real * pos_sin + x_imag * pos_cos
         return torch.cat([y_real, y_imag], dim=-1)
@@ -293,7 +293,7 @@ AutoTokenizer.register(NGPTConfig, fast_tokenizer_class=MiniLM2Tokenizer)
 # ----------------------------------------------------------------------------
 # RWKV-7: https://github.com/BlinkDL/RWKV-LM
 ## TODO: 实现循环生成
-from fla.layers import RWKV7Attention  # type: ignore
+from fla.layers import RWKV7Attention
 
 class RWKV7Config(PretrainedConfig):
     model_type = "rwkv7"
@@ -332,7 +332,7 @@ class TMix(nn.Module):
         x_attn, _, kv, v_first = self.rwkv7(
             x, v_first=v_first, past_key_values=past_key_values, use_cache=past_key_values is not None
         )
-        return x_attn, v_first, kv # type: ignore
+        return x_attn, v_first, kv
 
 class CMix(nn.Module):
     def __init__(self, dim: int, hidden_dim: int, block_id: int, n_blocks: int):

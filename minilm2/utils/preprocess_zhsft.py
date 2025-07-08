@@ -2,7 +2,7 @@ import os
 from multiprocessing import Process, Queue
 from json import loads
 from . import config
-from transformers import AutoTokenizer, PreTrainedTokenizer # type: ignore
+from transformers import AutoTokenizer, PreTrainedTokenizer
 import numpy as np
 from tqdm import tqdm
 

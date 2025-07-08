@@ -1,5 +1,5 @@
 from . import config
-from transformers import AutoTokenizer, PreTrainedTokenizer # type: ignore
+from transformers import AutoTokenizer, PreTrainedTokenizer
 import numpy as np
 from tqdm import tqdm
 import csv

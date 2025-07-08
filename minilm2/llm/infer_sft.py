@@ -2,7 +2,7 @@ import math
 import torch
 from tqdm import tqdm
 from torch.nn import functional as F
-from transformers import ( # type: ignore
+from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     TextStreamer,

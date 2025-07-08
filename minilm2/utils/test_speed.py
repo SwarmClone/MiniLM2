@@ -1,4 +1,4 @@
-from transformers import ( # type: ignore
+from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     TextStreamer

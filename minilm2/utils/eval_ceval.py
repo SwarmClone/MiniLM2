@@ -1,5 +1,5 @@
-from datasets import load_dataset # type: ignore
-from transformers import AutoTokenizer, AutoModelForCausalLM # type: ignore
+from datasets import load_dataset
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
 subjects = [

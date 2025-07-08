@@ -1,8 +1,8 @@
 from . import config
-from transformers import AutoTokenizer, PreTrainedTokenizer # type: ignore
+from transformers import AutoTokenizer, PreTrainedTokenizer
 import numpy as np
 from tqdm import tqdm
-import ijson # type: ignore
+import ijson
 
 def preprocess_wudao(text_path: str, bin_path: str, tokenizer: PreTrainedTokenizer):
     with open(text_path, 'r', encoding='utf-8') as f, open(bin_path, 'wb') as f_bin:
