@@ -26,7 +26,7 @@ def preprocess_openwebtext(text_path: str, bin_path: str, tokenizer: PreTrainedT
         pool.join()
     for i in tqdm(range(fid)):
         with (  open(f"{i}.bin", 'rb') as bin_part,
-                open(bin_path, 'wb') as f_bin):
+                open(bin_path, 'ab') as f_bin):
             data = bin_part.read()
             f_bin.write(data)
             os.remove(f"{i}.bin")
