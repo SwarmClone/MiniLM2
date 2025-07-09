@@ -37,16 +37,17 @@ if __name__ == '__main__':
     # 根据配置文件创建模型
     model_type = train_config["model"]
     print(f"Loading {model_type} model...")
-    if model_type == "NGPT":
+    if model_type.lower() == "ngpt":
         model_config = NGPTConfig(
             vocab_size=2 ** math.ceil(math.log2(vocab_size)),
             dim=train_config["model_dim"],
             n_blocks=train_config["num_layers"],
             n_heads=train_config["num_heads"],
             max_position_embeddings=train_config["max_length"],
-            dropout=train_config["dropout"]
+            dropout=train_config["dropout"],
+            rope_base=train_config["rope_base"]
         )
-    elif model_type == "RWKV7":
+    elif model_type.lower() == "rwkv7":
         model_config = RWKV7Config(
             vocab_size=2 ** math.ceil(math.log2(vocab_size)),
             dim=train_config["model_dim"],
@@ -55,14 +56,15 @@ if __name__ == '__main__':
             dropout=train_config["dropout"],
             max_lr=train_config["max_learning_rate"]
         )
-    elif model_type == "gpt":
+    elif model_type.lower() == "gpt":
         model_config = GPTConfig(
             vocab_size=2 ** math.ceil(math.log2(vocab_size)),
             dim=train_config["model_dim"],
             n_blocks=train_config["num_layers"],
             n_heads=train_config["num_heads"],
             max_position_embeddings=train_config["max_length"],
-            dropout=train_config["dropout"]
+            dropout=train_config["dropout"],
+            rope_base=train_config["rope_base"]
         )
     else:
         raise ValueError(f"Unknown model type: {model_type}")
@@ -116,34 +118,44 @@ if __name__ == '__main__':
             n: p for n, p in model.named_parameters()
             if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n
         }
-        muon_params_dict_2x = {
-            n: p for n, p in muon_params_dict.items()
-            if 'w_lora' in n
-        }
-        muon_params_dict_1x = {
-            n: p for n, p in muon_params_dict.items()
-            if 'w_lora' not in n
-        }
+        if model_type == "RWKV7":
+            muon_params_dict_2x = {
+                n: p for n, p in muon_params_dict.items()
+                if 'w_lora' in n
+            }
+            muon_params_dict_1x = {
+                n: p for n, p in muon_params_dict.items()
+                if 'w_lora' not in n
+            }
+            optimizers_with_lrscale.append((
+                Muon(
+                    muon_params=muon_params_dict_1x.values(),
+                    wd=train_config['weight_decay'],
+                    adamw_betas=tuple(train_config['betas'])
+                ),
+                1.0
+            ))
+            optimizers_with_lrscale.append((
+                Muon(
+                    muon_params=muon_params_dict_2x.values(),
+                    wd=train_config['weight_decay'],
+                    adamw_betas=tuple(train_config['betas'])
+                ),
+                2.0
+            ))
+        else:
+            optimizers_with_lrscale.append((
+                Muon(
+                    muon_params=muon_params_dict.values(),
+                    wd=train_config['weight_decay'],
+                    adamw_betas=tuple(train_config['betas'])
+                ),
+                1.0
+            ))
         adam_params_dict = {
             n: p for n, p in model.named_parameters()
             if n not in muon_params_dict
         }
-        optimizers_with_lrscale.append((
-            Muon(
-                muon_params=muon_params_dict_1x.values(),
-                wd=train_config['weight_decay'],
-                adamw_betas=tuple(train_config['betas'])
-            ),
-            1.0
-        ))
-        optimizers_with_lrscale.append((
-            Muon(
-                muon_params=muon_params_dict_2x.values(),
-                wd=train_config['weight_decay'],
-                adamw_betas=tuple(train_config['betas'])
-            ),
-            2.0
-        ))
         optimizers_with_lrscale.append((
             optim.AdamW(
                 adam_params_dict.values(),

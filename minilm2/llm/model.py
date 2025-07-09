@@ -25,6 +25,7 @@ class NGPTConfig(PretrainedConfig):
     n_heads = 12
     max_position_embeddings = 1024
     dropout = .0
+    rope_base = 10000
 
 class MiniLM2Tokenizer(PreTrainedTokenizerFast):
     def __init__(self, **kwargs):
@@ -39,11 +40,11 @@ class MiniLM2Tokenizer(PreTrainedTokenizerFast):
 class RotaryPositionEmbedding(nn.Module):
     """旋转位置编码"""
 
-    def __init__(self, dim: int, max_length: int):
+    def __init__(self, dim: int, max_length: int, base: int = 10000):
         super().__init__()
         assert dim % 2 == 0
         positions = torch.arange(0, max_length, 1)
-        theta = 1 / 50000 ** (torch.arange(0, dim, 2) / dim)  # thetai = 1/10000^(2i/dim)
+        theta = 1 / base ** (torch.arange(0, dim, 2) / dim)  # thetai = 1/10000^(2i/dim)
         """
             theta0  theta1  theta2  theta3 ... theta(dim/2-1)
         m=0 0theta0 0theta1 0theta2 0theta3
@@ -104,7 +105,7 @@ class NormalizedMLP(nn.Module):
 class NormalizedCausalSelfAttention(nn.Module):
     """带因果关系的多头自注意力，使用Flash Attention和RoPE"""
 
-    def __init__(self, dim: int, max_length: int, n_heads: int, dropout: float):
+    def __init__(self, dim: int, max_length: int, n_heads: int, dropout: float, rope_base: int = 10000):
         super().__init__()
         assert dim % n_heads==0
         self.n_heads = n_heads
@@ -113,7 +114,7 @@ class NormalizedCausalSelfAttention(nn.Module):
         self.k_proj = nn.Linear(dim, dim, bias=False)
         self.v_proj = nn.Linear(dim, dim, bias=False)
         self.o_proj = nn.Linear(dim, dim, bias=False)
-        self.pe = RotaryPositionEmbedding(self.head_dim, max_length)
+        self.pe = RotaryPositionEmbedding(self.head_dim, max_length, rope_base)
         self.dropout = dropout
         self.max_length = max_length
 
@@ -183,9 +184,9 @@ class NormalizedCausalSelfAttention(nn.Module):
 class NGPTBlock(nn.Module):
     """一个Decoder块"""
 
-    def __init__(self, dim: int, max_length: int, n_heads: int, dropout: float):
+    def __init__(self, dim: int, max_length: int, n_heads: int, dropout: float, rope_base: int = 10000):
         super().__init__()
-        self.attn = NormalizedCausalSelfAttention(dim, max_length, n_heads, dropout)
+        self.attn = NormalizedCausalSelfAttention(dim, max_length, n_heads, dropout, rope_base)
         self.mlp = NormalizedMLP(dim, dim * 4, dropout)
 
         # 自带的学习率
@@ -224,7 +225,8 @@ class NGPT(PreTrainedModel, GenerationMixin):
                 self.config.dim,
                 self.config.max_position_embeddings,
                 self.config.n_heads,
-                self.config.dropout
+                self.config.dropout,
+                self.config.rope_base
             ) for _ in range(self.config.n_blocks)
         ])
         self.lm_head = nn.Linear(self.config.dim, self.config.vocab_size)
@@ -444,6 +446,7 @@ class GPTConfig(PretrainedConfig):
     n_heads = 12
     max_position_embeddings = 1024
     dropout = .0
+    rope_base = 10000
 
 class MLP(nn.Module):
     def __init__(self, dim: int, hidden_dim: int, dropout: float):
@@ -461,7 +464,7 @@ class MLP(nn.Module):
 
 class CausalSelfAttention(nn.Module):
     """带因果关系的多头自注意力，使用Flash Attention和RoPE"""
-    def __init__(self, dim: int, max_length: int, n_heads: int, dropout: float):
+    def __init__(self, dim: int, max_length: int, n_heads: int, dropout: float, rope_base: int = 10000):
         super().__init__()
         assert dim % n_heads==0
         self.n_heads = n_heads
@@ -472,7 +475,7 @@ class CausalSelfAttention(nn.Module):
         self.o_proj = nn.Linear(dim, dim, bias=False)
         self.q_norm = nn.RMSNorm(self.head_dim)
         self.k_norm = nn.RMSNorm(self.head_dim)
-        self.pe = RotaryPositionEmbedding(self.head_dim, max_length)
+        self.pe = RotaryPositionEmbedding(self.head_dim, max_length, rope_base)
         self.dropout = dropout
         self.max_length = max_length
 
@@ -522,10 +525,10 @@ class CausalSelfAttention(nn.Module):
 
 class GPTBlock(nn.Module):
     """一个Decoder块"""
-    def __init__(self, dim: int, max_length: int, n_heads: int, dropout: float):
+    def __init__(self, dim: int, max_length: int, n_heads: int, dropout: float, rope_base: int = 10000):
         super().__init__()
         self.norm1 = nn.RMSNorm(dim)
-        self.attn = CausalSelfAttention(dim, max_length, n_heads, dropout)
+        self.attn = CausalSelfAttention(dim, max_length, n_heads, dropout, rope_base)
         self.norm2 = nn.RMSNorm(dim)
         self.mlp = MLP(dim, dim * 4, dropout)
 
@@ -548,7 +551,8 @@ class GPT(PreTrainedModel, GenerationMixin):
                 self.config.dim,
                 self.config.max_position_embeddings,
                 self.config.n_heads,
-                self.config.dropout
+                self.config.dropout,
+                self.config.rope_base
             ) for _ in range(self.config.n_blocks)
         ])
         self.lm_head = nn.Linear(self.config.dim, self.config.vocab_size)
