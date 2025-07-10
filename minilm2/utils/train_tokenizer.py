@@ -25,17 +25,22 @@ def train_tokenizer(f: StringIO, extra_tokens: list[str] | None) -> Tokenizer:
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 3:
-        print("Usage: python -m minilm2.utils.train_tokenizer <text path> <tokenizer path>")
+        print("Usage: python -m minilm2.utils.train_tokenizer <text path> <tokenizer path> [<initial alphabet>]")
         exit(1)
-    path, tokenizer_path = sys.argv[1:]
+    path, tokenizer_path, *rest = sys.argv[1:]
+    alphabet_str = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ \t\n"
+    if rest:
+        alphabet_str += open(rest[0]).read()
+    alphabet = [*set(alphabet_str)]
     print(f"Training tokenizer from {path}")
     tokenizer = Tokenizer(BPE(unk_token="<unk>"))
-    tokenizer.pre_tokenizer = Split(r"\s+", "merged_with_previous")
+    tokenizer.pre_tokenizer = Split(r"\s", "merged_with_previous")
     trainer = BpeTrainer(
         vocab_size=32768,
         special_tokens=[*config.SPECIAL_TOKENS.keys()],
+        initial_alphabet=alphabet
     )
-    tokenizer.train_from_iterator(open(path), trainer=trainer)
+    tokenizer.train_from_iterator(open(path, encoding="utf-8"), trainer=trainer)
     os.makedirs(tokenizer_path, exist_ok=True)
     open(tokenizer_path + "/tokenizer.json", "w").write(tokenizer.to_str())
     tfs_tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_path + "/tokenizer.json")
