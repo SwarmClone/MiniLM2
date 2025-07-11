@@ -1,4 +1,4 @@
-{%- set sep = '\n\n\n' %}
+{%- set sep = '<eos>' %}
 {%- for message in messages %}
     {%- set role_current = message['role'] %}
     {%- if not loop.last %}

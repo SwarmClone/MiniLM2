@@ -8,8 +8,8 @@ from . import config
 
 DEVICE = "cuda"
 
-model_name = "models/transformers/ngpt/checkpoint_5400_3.6507.pt"
-# model_name = "models/transformers/ngpt/pretrain0.4b"
+# model_name = "models/transformers/ngpt/checkpoint_5400_3.6507.pt"
+model_name = "models/transformers/ngpt/pretrain0.4b"
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
@@ -18,7 +18,7 @@ model = AutoModelForCausalLM.from_pretrained(
 ).to(DEVICE)
 tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
-model_inputs = tokenizer(["An incrementing sequence of numbers: 1, 2, 3, "], return_tensors="pt").to(model.device)
+model_inputs = tokenizer(["一则对人工智能的介绍：人工智能是"], return_tensors="pt").to(model.device)
 streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 
 generated_ids = model.generate(

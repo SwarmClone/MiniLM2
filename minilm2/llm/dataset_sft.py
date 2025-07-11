@@ -91,13 +91,15 @@ if __name__ == '__main__':
     from torch.utils.data import DataLoader
     from transformers import AutoTokenizer
     if len(sys.argv) < 3:
-        print("Usage: python -m minilm2.llm.dataset_sft <tokenizer_path> <data_path>")
+        print("Usage: python -m minilm2.llm.dataset_sft <tokenizer_path> <data_path> [<max length>]")
         exit(1)
     tokenizer_path = sys.argv[1]
     data_path = sys.argv[2]
+    max_length = int(sys.argv[3]) if len(sys.argv) > 3 else 1024
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
     print(f"Loading dataset from {data_path}...")
-    dataset = from_file(data_path, 1024)
+    dataset = from_file(data_path, max_length)
+    print(f"Dataset size: {len(dataset)}")
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
     for x, y, m in dataloader:
         for i in range(len(y[0])):

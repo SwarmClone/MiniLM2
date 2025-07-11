@@ -6,17 +6,16 @@ from transformers import AutoTokenizer, PreTrainedTokenizer
 import numpy as np
 from tqdm import tqdm
 
+def get_messages(history: list[list[str]]):
+    messages = []
+    for conversation in history:
+        messages.append({'role': 'user', 'content': conversation[0]})
+        messages.append({'role': 'assistant', 'content': conversation[1]})
+    return messages
+
 def worker(q: Queue, tokenizer: PreTrainedTokenizer, bin_path: str, mask_path: str, max_length: int, i: int):
     bin_path = bin_path + f"{i}.part"
     mask_path = mask_path + f"{i}.part"
-
-    separator_ids = tokenizer.encode("\n" * 3)
-    human_separator_mask = [0] * len(separator_ids)
-    ai_separator_mask = [1] * len(separator_ids)
-    human_prefix_ids = tokenizer.encode(config.HUMAN_PREFIX)
-    human_prefix_mask = [0] * len(human_prefix_ids)
-    ai_prefix_ids = tokenizer.encode(config.AI_PREFIX)
-    ai_prefix_mask = [0] * len(ai_prefix_ids)
 
     with open(bin_path, 'wb') as f_bin, open(mask_path, 'wb') as f_mask:
         while True:
@@ -29,23 +28,19 @@ def worker(q: Queue, tokenizer: PreTrainedTokenizer, bin_path: str, mask_path: s
             ids = []
             mask = []
             data["history"].append([data["instruction"] + data["input"], data["output"]])
-            for i in range(len(data["history"])):
-                # 人类输入
-                human_input_codes = tokenizer.encode(data["history"][i][0])
-                ids += human_prefix_ids + human_input_codes + separator_ids
-                mask += human_prefix_mask +  [0] * len(human_input_codes) + human_separator_mask
-                # AI输出
-                ai_input_codes = tokenizer.encode(data["history"][i][1])
-                ids += ai_prefix_ids + ai_input_codes + separator_ids
-                mask += ai_prefix_mask + [1] * (len(ai_input_codes)) + ai_separator_mask
-            raw_ids = np.array(ids, dtype=np.uint16)
+            d = tokenizer.apply_chat_template(
+                get_messages(data["history"]),
+                return_assistant_tokens_mask=True,
+                return_tensors="np",
+                return_dict=True
+            )
+            raw_ids = d.input_ids.astype(np.uint16).squeeze()
             pad_len = max_length + 1 - raw_ids.shape[0] % (max_length + 1)
-            padded_ids = np.concat((raw_ids, np.zeros(pad_len, dtype=np.uint16)))
+            padded_ids = np.pad(raw_ids, (0, pad_len), 'constant', constant_values=config.SPECIAL_TOKENS["<pad>"])
             padded_ids.tofile(f_bin)
-            raw_mask = np.array(mask, dtype=np.bool)
-            padded_mask = np.concat((raw_mask, np.zeros(pad_len, dtype=np.bool)))
+            raw_mask = d.assistant_masks.astype(np.bool).squeeze()
+            padded_mask = np.pad(raw_mask, (0, pad_len), 'constant', constant_values=False)
             padded_mask.tofile(f_mask)
-            
 
 def preprocess_zhsft(text_path: str, bin_path: str, mask_path: str, tokenizer: PreTrainedTokenizer, max_length: int):
     num_workers = os.cpu_count()
