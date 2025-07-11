@@ -57,8 +57,8 @@ class RotaryPositionEmbedding(nn.Module):
         positions_theta = positions.unsqueeze(1) * theta.unsqueeze(0)  # (max_length, dim//2)
         positions_sin = torch.sin(positions_theta)
         positions_cos = torch.cos(positions_theta)
-        self.register_buffer('positions_sin', positions_sin)
-        self.register_buffer('positions_cos', positions_cos)
+        self.register_buffer('positions_sin', positions_sin, persistent=False)
+        self.register_buffer('positions_cos', positions_cos, persistent=False)
         self.dim = dim
 
     def forward(self, x: torch.Tensor, *, offset: int = 0) -> torch.Tensor:
