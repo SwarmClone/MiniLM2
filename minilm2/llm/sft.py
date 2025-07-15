@@ -41,9 +41,9 @@ if __name__ == '__main__':
     print(f"==> Number of parameters: {params / 1e6:.2f}M")
 
     # 去除不需要的梯度
-    if 'finetune_layers' in train_config:
-        print(f"==> Freezing the last {train_config['num_layers'] - train_config['finetune_layers']} layers...")
-        for block in model.blocks[train_config['finetune_layers'] - 1:]:
+    if 'finetune_layers' in train_config and (n_freezed_layers := train_config['num_layers'] - train_config['finetune_layers']) > 0:
+        print(f"==> Freezing the first {n_freezed_layers} layers...")
+        for block in model.blocks[:n_freezed_layers]:
             for param in block.parameters():
                 param.requires_grad = False
 
@@ -51,8 +51,19 @@ if __name__ == '__main__':
     model.to(config.DEVICE)
     scaler = GradScaler(enabled=train_config['bfloat16']) # 如果启用bfloat16则启用混合精度训练
     print("==> Compiling model...")
-    model.compile()
+    # model.compile()
     model.train()
+
+    # 是否启用梯度检查点
+    checkpointing_kwargs: dict[str, bool | int] = {}
+    if train_config.get("gradient_checkpointing"):
+        if train_config.get("model").lower() == "ngpt":
+            checkpointing_kwargs = {
+                "checkpointing": True,
+                "checkpointing_segments": train_config.get("gradient_checkpointing_segments", 1)
+            }
+        else:
+            print("!! 非NGPT模型暂不支持使用梯度检查点 !!")
 
     # 加载数据集
     print("Loading dataset...")
@@ -156,6 +167,9 @@ if __name__ == '__main__':
     try:
         with tqdm(train_loader) as pbar:
             for x, y, m in pbar:
+                if m.sum() == 0:
+                    continue # 防止除0导致NaN
+
                 # 一个step的开始，更新学习率
                 if micro_step % train_config["n_batches_per_step"] == 0:
                     total_loss = 0.0
@@ -174,7 +188,7 @@ if __name__ == '__main__':
                         dtype=torch.bfloat16,
                         enabled=train_config["bfloat16"] # 启用bfloat16则使用混合精度训练
                     ):
-                    logits = model(x)
+                    logits = model(x, **checkpointing_kwargs)
                     loss = (F.cross_entropy(
                         logits.view(-1, logits.size(-1)),
                         y.view(-1),
