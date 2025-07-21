@@ -21,8 +21,6 @@
     "betas": [0.9, 0.99],
     "weight_decay": 0,
     "bfloat16": false,
-    "gradient_checkpointing": true,
-    "checkpointing_segments": 1,
     
     "model_path": "",
     "optimizer_state_path": "",

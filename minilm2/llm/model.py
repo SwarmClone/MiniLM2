@@ -1,7 +1,6 @@
 import math
 import torch
 from torch import nn
-from torch.utils.checkpoint import checkpoint_sequential
 import torch.nn.functional as F
 from transformers import (
     PreTrainedModel,
@@ -12,8 +11,7 @@ from transformers import (
     PreTrainedTokenizerFast,
     AutoTokenizer
 )
-from transformers.modeling_outputs import CausalLMOutputWithPast, CausalLMOutput
-from transformers.cache_utils import DynamicCache
+from transformers.modeling_outputs import CausalLMOutputWithPast
 
 # nGPT
 normalize = lambda x, dim=-1: F.normalize(x, p=2, dim=dim)
@@ -62,45 +60,12 @@ class RotaryPositionEmbedding(nn.Module):
         self.register_buffer('positions_sin', positions_sin, persistent=False)
         self.register_buffer('positions_cos', positions_cos, persistent=False)
         self.dim = dim
-        self.base = base
-        self.original_max_length = max_length
-        self.max_length = max_length
-    
-    def extend(self, new_max_length: int) -> None: # 扩展以避免反复重算
-        new_positions = torch.arange(self.max_length, new_max_length, 1)
-        new_theta = 1 / self.base ** (torch.arange(0, self.dim, 2) / self.dim)
-        new_positions_theta = new_positions.unsqueeze(1) * new_theta.unsqueeze(0)  # (max_length, dim//2)
-        # 明确指定 device 参数
-        new_positions_sin = torch.sin(new_positions_theta).to(device=self.positions_sin.device)
-        new_positions_cos = torch.cos(new_positions_theta).to(device=self.positions_sin.device)
-        # 拼接新的位置编码
-        self.register_buffer('positions_sin', torch.cat((self.positions_sin, new_positions_sin), dim=0), persistent=False)
-        self.register_buffer('positions_cos', torch.cat((self.positions_cos, new_positions_cos), dim=0), persistent=False)
-        self.max_length = new_max_length
-    
-    def reset(self) -> None:
-        device = self.positions_sin.device
-        # 重新计算位置编码
-        positions = torch.arange(0, self.original_max_length, 1)
-        theta = 1 / self.base ** (torch.arange(0, self.dim, 2) / self.dim)
-        positions_theta = positions.unsqueeze(1) * theta.unsqueeze(0)
-        positions_sin = torch.sin(positions_theta).to(device=device)
-        positions_cos = torch.cos(positions_theta).to(device=device)
-        self.register_buffer('positions_sin', positions_sin, persistent=False)
-        self.register_buffer('positions_cos', positions_cos, persistent=False)
-        self.max_length = self.original_max_length
-        self.to(device)
 
     def forward(self, x: torch.Tensor, *, offset: int = 0) -> torch.Tensor:
-        end_pos = offset + x.size(-2)
-        if end_pos > self.max_length:
-            # 超出范围，重算
-            self.extend((end_pos // 1024 + 1) * 1024)
-            ## TODO：顺带加上YaRN
         x_real = x[..., :self.dim // 2]  # (x.size(-2), dim//2)
         x_imag = x[..., self.dim // 2:]
-        pos_cos = self.positions_cos[offset:end_pos] # (x.size(-2), dim//2)
-        pos_sin = self.positions_sin[offset:end_pos]
+        pos_cos = self.positions_cos[offset:offset + x.size(-2)] # (x.size(-2), dim//2)
+        pos_sin = self.positions_sin[offset:offset + x.size(-2)]
         y_real = x_real * pos_cos - x_imag * pos_sin
         y_imag = x_real * pos_sin + x_imag * pos_cos
         return torch.cat([y_real, y_imag], dim=-1)
@@ -159,55 +124,55 @@ class NormalizedCausalSelfAttention(nn.Module):
         self.restore_scale_sqk = sqkinit / sqkscale
         self.sqk = nn.Parameter(torch.ones(n_heads, 1, self.head_dim) * sqkscale)
 
-    def forward(self, x: torch.Tensor, past_key_values: tuple[torch.Tensor, torch.Tensor] | None = None, use_cache: bool = False):
+    def forward(self, x: torch.Tensor, *, past_key_values: tuple[torch.Tensor, torch.Tensor] | None = None):
         B, T, C = x.shape
         actual_sqk = self.sqk * self.restore_scale_sqk  # (n_heads, 1, head_dim)
 
         # (B, T, C) -proj-> (B, T, C)
         # -view-> (B, T, n_heads, head_dim)
         # -T(1, 2)-> (B, n_heads, T, head_dim)
-        new_k = self.k_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
-        new_v = self.v_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
-        q = self.q_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
         if past_key_values is not None:
             k_cache, v_cache = past_key_values
             cache_size = k_cache.size(-2)
-            k = torch.cat([k_cache, new_k], dim=-2)
-            v = torch.cat([v_cache, new_v], dim=-2)
+            xx = x[..., cache_size:, :]
+            TT = T - cache_size
+            k = self.k_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
+            v = self.v_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
+            k = torch.cat([k_cache, k], dim=-2)
+            v = torch.cat([v_cache, v], dim=-2)
+            q = self.q_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
         else:
             cache_size = 0
-            k = new_k
-            v = new_v
+            TT = T
+            k = self.k_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
+            v = self.v_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
+            q = self.q_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
+            q_offset = 0
+        
+        k_cache, v_cache = k.clone().detach(), v.clone().detach()
 
         q = self.pe(q, offset=cache_size).to(x.dtype) * actual_sqk
         k = self.pe(k).to(x.dtype) * actual_sqk
 
+        attn_mask = torch.ones(TT, T, dtype=torch.bool, device=x.device).tril(cache_size)
 
         # (B, n_heads, T, head_dim) -T(1, 2)-> (B, T, n_heads, head_dim)
         # -view-> (B, T, C)
-        if use_cache:
-            attn_mask = torch.ones(B, T, T + cache_size, dtype=torch.bool, device=x.device).tril(cache_size)
-            x = (
-                nn.functional.scaled_dot_product_attention(
-                    q, k, v,
-                    attn_mask, dropout_p=self.dropout,
-                    scale=self.head_dim ** 0.5)
-                .transpose(1, 2)
-                .reshape(B, T, C)
-            )
-            x = normalize(self.o_proj(x))
-            return x, (new_k, new_v)
-        
         x = (
             nn.functional.scaled_dot_product_attention(
                 q, k, v,
-                is_causal=True, dropout_p=self.dropout,
+                attn_mask=attn_mask, dropout_p=self.dropout,
                 scale=self.head_dim ** 0.5)
             .transpose(1, 2)
-            .reshape(B, T, C)
+            .reshape(B, TT, C)
         )
-        x = normalize(self.o_proj(x))
-        return x
+
+        return normalize(self.o_proj(x)), (k_cache, v_cache)
+
+    @torch.no_grad()
+    def clear_cache(self) -> None:
+        self.k_cache = None
+        self.v_cache = None
 
     @torch.no_grad()
     def normalize(self) -> None:
@@ -234,20 +199,14 @@ class NGPTBlock(nn.Module):
         self.restore_scale_m = lrinit_m / lrscale_m
         self.lr_m = nn.Parameter(torch.ones(dim) * lrscale_m)
 
-    def forward(self, x: torch.Tensor, past_key_values: tuple[torch.Tensor, torch.Tensor] | None = None, use_cache: bool = False):
+    def forward(self, x: torch.Tensor, past_key_values: tuple[torch.Tensor, torch.Tensor] | None = None):
         actual_lr_a = self.lr_a * self.restore_scale_a
         actual_lr_m = self.lr_m * self.restore_scale_m
-        if use_cache:
-            attn_out, (k, v) = self.attn(x, past_key_values, True)
-            xx = x[..., -attn_out.size(-2):, :]
-            xx = normalize(xx + (attn_out - xx) * actual_lr_a)
-            xx = normalize(xx + (self.mlp(xx) - xx) * actual_lr_m)
-            return F.pad(xx, (0, 0, x.size(-2) - xx.size(-2), 0)), (k, v)
-        else:
-            attn_out = self.attn(x)
-            x = normalize(x + (attn_out - x) * actual_lr_a)
-            x = normalize(x + (self.mlp(x) - x) * actual_lr_m)
-            return x
+        attn_out, (k, v) = self.attn(x, past_key_values=past_key_values)
+        xx = x[..., -attn_out.size(-2):, :]
+        xx = normalize(xx + (attn_out - xx) * actual_lr_a)
+        xx = normalize(xx + (self.mlp(xx) - xx) * actual_lr_m)
+        return F.pad(xx, (0, 0, x.size(-2) - xx.size(-2), 0)), (k, v)
 
     @torch.no_grad()
     def normalize(self) -> None:
@@ -261,7 +220,7 @@ class NGPT(PreTrainedModel, GenerationMixin):
         super().__init__(config)
         self.config = config
         self.wte = nn.Embedding(self.config.vocab_size, self.config.dim)
-        self.blocks = nn.Sequential(*[
+        self.blocks = nn.ModuleList([
             NGPTBlock(
                 self.config.dim,
                 self.config.max_position_embeddings,
@@ -280,55 +239,26 @@ class NGPT(PreTrainedModel, GenerationMixin):
 
         self.normalize()
 
-    def forward(self, input_ids: torch.Tensor,
+    def forward(self, x: torch.Tensor,
             return_dict: bool = False,
-            past_key_values: DynamicCache | None = None,
-            use_cache: bool = False,
-            checkpointing: bool = False,
-            checkpointing_segments: int | None = None,
-            **_kwargs):
-        assert not (use_cache and checkpointing), "禁止启用缓存和检查点"
-        x = input_ids
-        checkpoint_segments = checkpointing_segments or len(self.blocks)
+            past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = None,
+            use_cache=False):
+        B, T = x.shape
         x = self.wte(x)
-        
-        # 推理每一层
-        if not use_cache:
-            if checkpointing:
-                x = checkpoint_sequential(self.blocks, checkpoint_segments, x)
+        key_values: list[tuple[torch.Tensor, torch.Tensor]] = []
+        for i in range(self.config.n_blocks):
+            block = self.blocks[i]
+            if past_key_values is not None:
+                x, (k, v) = block(x, past_key_values=past_key_values[i])
             else:
-                x = self.blocks(x)
-        else:
-            if past_key_values is None:
-                past_key_values = DynamicCache()
-                for i, block in enumerate(self.blocks):
-                    x, (k, v) = block(x, None, True)
-                    past_key_values.update(k, v, i)
-            else:
-                for i, block in enumerate(self.blocks):
-                    x, (k, v) = block(x, past_key_values[i], True)
-                    past_key_values.update(k, v, i)
-                
-
+                x, (k, v) = block(x)
+            key_values.append((k, v))
         x = self.lm_head(x)
         actual_sz = self.sz * self.restore_scale
         out = x * actual_sz
         if not return_dict:
             return out
-        if use_cache:
-            return CausalLMOutputWithPast(logits=out, past_key_values=past_key_values)
-        return CausalLMOutput(logits=out)
-    
-    def prepare_inputs_for_generation(
-            self,
-            input_ids: torch.LongTensor,
-            past_key_values: DynamicCache | None = None,
-            attention_mask: torch.LongTensor | None = None,
-            inputs_embeds: torch.FloatTensor | None = None,
-            cache_position: torch.LongTensor | None = None,
-            token_type_ids: torch.LongTensor | None = None,
-            **kwargs):
-        return super().prepare_inputs_for_generation(input_ids, past_key_values, attention_mask, inputs_embeds, cache_position, token_type_ids=token_type_ids, **kwargs)
+        return CausalLMOutputWithPast(logits=out, past_key_values=tuple(key_values))
 
     def save(self, path: str):
         torch.save(self.state_dict(), path)  # 保存模型参数防止带上不必要的前缀
@@ -339,6 +269,24 @@ class NGPT(PreTrainedModel, GenerationMixin):
         self.lm_head.weight.data.copy_(normalize(self.lm_head.weight.data))
         for block in self.blocks:
             block.normalize()
+
+    def prepare_inputs_for_generation(self, input_ids,
+            past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = None,
+            use_cache=False,
+            token_type_ids=None,
+            attention_mask=None,
+            **kwargs):
+        if len(input_ids.shape) == 1:
+            input_ids = input_ids.unsqueeze(0) # 如果缺少batch维度，手动加上
+        if input_ids.size(-1) > self.config.max_position_embeddings: # 如果超出了最大长度，将前面多出的部分截断
+            cut_idx = input_ids.size(-1) - self.config.max_position_embeddings
+            input_ids = input_ids[..., cut_idx:]
+            if past_key_values is not None:
+                past_key_values = tuple(
+                    (k[..., 1:, :], v[..., 1:, :]) for k, v in past_key_values
+                ) # 我们假定每次生成一个token，所以只需要去掉第一个位置
+            
+        return {"x": input_ids, "use_cache": use_cache, "past_key_values": past_key_values if use_cache else None}
 
 AutoConfig.register("ngpt", NGPTConfig)
 AutoModelForCausalLM.register(NGPTConfig, NGPT)

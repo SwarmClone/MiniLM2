@@ -1,4 +1,4 @@
-from transformers import (
+from transformers import ( # type: ignore
     PreTrainedTokenizerFast,
     AutoTokenizer
 )

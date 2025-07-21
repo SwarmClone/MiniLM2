@@ -1,6 +1,13 @@
-from transformers import (
+from transformers import ( # type: ignore
     PreTrainedTokenizerFast,
     TensorType
+)
+from transformers.tokenization_utils import ( # type: ignore
+    PreTokenizedInput,
+    EncodedInput,
+    TextInput,
+    PaddingStrategy,
+    TruncationStrategy
 )
 
 class MiniLM2Tokenizer(PreTrainedTokenizerFast):
