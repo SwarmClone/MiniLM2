@@ -26,7 +26,8 @@ generated_ids = model.generate(
     max_new_tokens=200,
     streamer=streamer,
     do_sample=False,
-    temperature=0
+    temperature=0,
+    use_cache=True
 )
 generated_ids = [
     output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)

@@ -20,16 +20,28 @@ tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 model_inputs = tokenizer(["有时候，"], return_tensors="pt").to(model.device)
 
 speeds: list[float] = []
+def test_speed(use_cache: bool = True):
+    for _ in range(5):
+        t0 = perf_counter()
+        generated_ids = model.generate(
+            **model_inputs,
+            max_new_tokens=200,
+            use_cache=use_cache
+        )
+        t1 = perf_counter()
+        print(f"{(speed := len(generated_ids[0]) / (t1 - t0)):.3f} tokens/s")
+        speeds.append(speed)
+    return speeds
 
-for i in range(5):
-    t0 = perf_counter()
-    generated_ids = model.generate(
-        **model_inputs,
-        max_new_tokens=200
-    )
-    t1 = perf_counter()
-    print(f"{(speed := len(generated_ids[0]) / (t1 - t0)):.3f} tokens/s")
-    speeds.append(speed)
+print("===== use_cache = True =====")
+speeds = test_speed()
+
+print(f"Average speed: {sum(speeds) / len(speeds):.3f} tokens/s")
+print(f"Max speed: {max(speeds):.3f} tokens/s")
+print(f"Min speed: {min(speeds):.3f} tokens/s")
+
+print("===== use_cache = False =====")
+speeds = test_speed(False)
 
 print(f"Average speed: {sum(speeds) / len(speeds):.3f} tokens/s")
 print(f"Max speed: {max(speeds):.3f} tokens/s")

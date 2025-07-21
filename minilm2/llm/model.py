@@ -136,20 +136,20 @@ class NormalizedCausalSelfAttention(nn.Module):
             cache_size = k_cache.size(-2)
             xx = x[..., cache_size:, :]
             TT = T - cache_size
-            k = self.k_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
-            v = self.v_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
-            k = torch.cat([k_cache, k], dim=-2)
-            v = torch.cat([v_cache, v], dim=-2)
+            new_k = self.k_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
+            new_v = self.v_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
+            k = torch.cat([k_cache, new_k], dim=-2)
+            v = torch.cat([v_cache, new_v], dim=-2)
             q = self.q_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
         else:
             cache_size = 0
             TT = T
-            k = self.k_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
-            v = self.v_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
+            new_k = self.k_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
+            new_v = self.v_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
+            k = new_k
+            v = new_v
             q = self.q_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
             q_offset = 0
-        
-        k_cache, v_cache = k.clone().detach(), v.clone().detach()
 
         q = self.pe(q, offset=cache_size).to(x.dtype) * actual_sqk
         k = self.pe(k).to(x.dtype) * actual_sqk
@@ -167,12 +167,7 @@ class NormalizedCausalSelfAttention(nn.Module):
             .reshape(B, TT, C)
         )
 
-        return normalize(self.o_proj(x)), (k_cache, v_cache)
-
-    @torch.no_grad()
-    def clear_cache(self) -> None:
-        self.k_cache = None
-        self.v_cache = None
+        return normalize(self.o_proj(x)), (new_k, new_v)
 
     @torch.no_grad()
     def normalize(self) -> None:
@@ -241,24 +236,30 @@ class NGPT(PreTrainedModel, GenerationMixin):
 
     def forward(self, x: torch.Tensor,
             return_dict: bool = False,
-            past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = None,
+            past_key_values: DynamicCache | None = None,
             use_cache=False):
-        B, T = x.shape
         x = self.wte(x)
-        key_values: list[tuple[torch.Tensor, torch.Tensor]] = []
+        empty_cache = False
+        if use_cache and past_key_values is None:
+            past_key_values = DynamicCache()
+            empty_cache = True
         for i in range(self.config.n_blocks):
             block = self.blocks[i]
-            if past_key_values is not None:
-                x, (k, v) = block(x, past_key_values=past_key_values[i])
-            else:
+            if empty_cache or not use_cache:
                 x, (k, v) = block(x)
-            key_values.append((k, v))
+            else:
+                x, (k, v) = block(x, past_key_values=past_key_values[i])
+            if use_cache:
+                past_key_values.update(k, v, i)
+            
         x = self.lm_head(x)
         actual_sz = self.sz * self.restore_scale
         out = x * actual_sz
         if not return_dict:
             return out
-        return CausalLMOutputWithPast(logits=out, past_key_values=tuple(key_values))
+        if use_cache:
+            return CausalLMOutputWithPast(logits=out, past_key_values=past_key_values)
+        return CausalLMOutput(logits=out)
 
     def save(self, path: str):
         torch.save(self.state_dict(), path)  # 保存模型参数防止带上不必要的前缀
