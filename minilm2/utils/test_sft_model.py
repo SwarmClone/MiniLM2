@@ -2,11 +2,7 @@ from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     TextStreamer,
-    StoppingCriteriaList,
-    StopStringCriteria
 )
-from time import time
-from . import config
 
 DEVICE = "cuda"
 
@@ -27,22 +23,14 @@ messages = [
 text = tokenizer.apply_chat_template(
     messages,
     tokenize=False,
-    add_generation_prompt=True,
-    stopping_criteria=StoppingCriteriaList([
-        StopStringCriteria(tokenizer, "\n" * 3)
-    ])
+    add_generation_prompt=True
 )
 model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+streamer = TextStreamer(tokenizer, skip_prompt=True)
 
 generated_ids = model.generate(
     **model_inputs,
-    max_new_tokens=200,
-    streamer=streamer
+    max_new_tokens=32768,
+    streamer=streamer,
+    use_cache=True,
 )
-generated_ids = [
-    output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-]
-
-response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-print(response)

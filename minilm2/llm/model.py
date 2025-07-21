@@ -134,16 +134,13 @@ class NormalizedCausalSelfAttention(nn.Module):
         if past_key_values is not None:
             k_cache, v_cache = past_key_values
             cache_size = k_cache.size(-2)
-            xx = x[..., cache_size:, :]
-            TT = T - cache_size
-            new_k = self.k_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
-            new_v = self.v_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
+            new_k = self.k_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
+            new_v = self.v_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
             k = torch.cat([k_cache, new_k], dim=-2)
             v = torch.cat([v_cache, new_v], dim=-2)
-            q = self.q_proj(xx).view(B, TT, self.n_heads, -1).transpose(1, 2)
+            q = self.q_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
         else:
             cache_size = 0
-            TT = T
             new_k = self.k_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
             new_v = self.v_proj(x).view(B, T, self.n_heads, -1).transpose(1, 2)
             k = new_k
@@ -154,7 +151,7 @@ class NormalizedCausalSelfAttention(nn.Module):
         q = self.pe(q, offset=cache_size).to(x.dtype) * actual_sqk
         k = self.pe(k).to(x.dtype) * actual_sqk
 
-        attn_mask = torch.ones(TT, T, dtype=torch.bool, device=x.device).tril(cache_size)
+        attn_mask = torch.ones(T, T + cache_size, dtype=torch.bool, device=x.device).tril(cache_size)
 
         # (B, n_heads, T, head_dim) -T(1, 2)-> (B, T, n_heads, head_dim)
         # -view-> (B, T, C)
@@ -164,7 +161,7 @@ class NormalizedCausalSelfAttention(nn.Module):
                 attn_mask=attn_mask, dropout_p=self.dropout,
                 scale=self.head_dim ** 0.5)
             .transpose(1, 2)
-            .reshape(B, TT, C)
+            .reshape(B, T, C)
         )
 
         return normalize(self.o_proj(x)), (new_k, new_v)
@@ -234,11 +231,11 @@ class NGPT(PreTrainedModel, GenerationMixin):
 
         self.normalize()
 
-    def forward(self, x: torch.Tensor,
+    def forward(self, input_ids: torch.Tensor,
             return_dict: bool = False,
             past_key_values: DynamicCache | None = None,
-            use_cache=False):
-        x = self.wte(x)
+            use_cache=False, **kwargs):
+        x = self.wte(input_ids)
         empty_cache = False
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
@@ -270,24 +267,9 @@ class NGPT(PreTrainedModel, GenerationMixin):
         self.lm_head.weight.data.copy_(normalize(self.lm_head.weight.data))
         for block in self.blocks:
             block.normalize()
-
-    def prepare_inputs_for_generation(self, input_ids,
-            past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = None,
-            use_cache=False,
-            token_type_ids=None,
-            attention_mask=None,
-            **kwargs):
-        if len(input_ids.shape) == 1:
-            input_ids = input_ids.unsqueeze(0) # 如果缺少batch维度，手动加上
-        if input_ids.size(-1) > self.config.max_position_embeddings: # 如果超出了最大长度，将前面多出的部分截断
-            cut_idx = input_ids.size(-1) - self.config.max_position_embeddings
-            input_ids = input_ids[..., cut_idx:]
-            if past_key_values is not None:
-                past_key_values = tuple(
-                    (k[..., 1:, :], v[..., 1:, :]) for k, v in past_key_values
-                ) # 我们假定每次生成一个token，所以只需要去掉第一个位置
-            
-        return {"x": input_ids, "use_cache": use_cache, "past_key_values": past_key_values if use_cache else None}
+    
+    def prepare_inputs_for_generation(self, input_ids: torch.LongTensor, past_key_values: Cache | None = None, attention_mask: torch.LongTensor | None = None, inputs_embeds: torch.FloatTensor | None = None, cache_position: torch.LongTensor | None = None, token_type_ids: torch.LongTensor | None = None, **kwargs):
+        return super().prepare_inputs_for_generation(input_ids, past_key_values, attention_mask, inputs_embeds, cache_position, **kwargs)
 
 AutoConfig.register("ngpt", NGPTConfig)
 AutoModelForCausalLM.register(NGPTConfig, NGPT)
