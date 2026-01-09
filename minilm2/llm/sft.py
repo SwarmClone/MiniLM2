@@ -1,18 +1,17 @@
 import warnings
 import time
-import torch
+import pathlib
 from tqdm import tqdm
-from torch import nn, optim
+import torch
+from torch import nn
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
 from torch.amp.autocast_mode import autocast
 from torch.amp.grad_scaler import GradScaler
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from flash_muon import Muon
-from minilm2.llm.modeling_ngpt import *
 from minilm2.llm.dataset_sft import SFTDataset, collate_fn, from_file
 from minilm2.llm import config
 from minilm2.llm.lr_schedule import get_lr_schedule
+from minilm2.utils.train_utils import *
 
 if __name__ == '__main__':
     import sys
@@ -23,33 +22,30 @@ if __name__ == '__main__':
         print('Usage: python -m minilm2.llm.sft <config_path>')
         exit(1)
     train_config = json.load(open("models/defaults.json"))
-    config_path = sys.argv[1]
-    config_dir = os.path.dirname(config_path) # 配置文件路径
+    config_path = pathlib.Path(sys.argv[1])
+    config_dir = config_path.parent # 配置文件路径
     train_config.update(json.load(open(config_path)))
 
     # 加载tokenizer并获取词表大小
-    print("Loading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(os.path.join(config_dir, train_config['tokenizer_path']))
-    vocab_size = len(tokenizer)
-    print(f"==> Vocab size: {vocab_size}")
-
-    # 根据配置文件创建模型
-    model_type = train_config["model"]
-    print(f"Loading {model_type} model...")
-    model = AutoModelForCausalLM.from_pretrained(os.path.join(config_dir, train_config['model_path']))
+    print("Loading tokenizer and model...")
+    model_type = train_config["model"].lower()
+    model, tokenizer = get_model_tokenizer(config_dir, train_config)
+    
     # 统计参数量
+    params = sum(p.numel() for p in model.parameters())
+    print(f"==> Number of parameters: {params / 1e6:.2f}M")# 统计参数量
     params = sum(p.numel() for p in model.parameters())
     print(f"==> Number of parameters: {params / 1e6:.2f}M")
 
     # 去除不需要的梯度
     if 'finetune_layers' in train_config:
         print(f"==> Freezing the last {train_config['num_layers'] - train_config['finetune_layers']} layers...")
-        for block in model.blocks[train_config['finetune_layers'] - 1:]:
-            for param in block.parameters():
+        for block in model.blocks[train_config['finetune_layers'] - 1:]:  # pyright: ignore[reportIndexIssue]
+            for param in block.parameters():  # pyright: ignore[reportAttributeAccessIssue]
                 param.requires_grad = False
 
     # 将模型移动到显存并编译以加速训练
-    model.to(config.DEVICE)
+    model.to(model, config.DEVICE)
     scaler = GradScaler(enabled=train_config['bfloat16']) # 如果启用bfloat16则启用混合精度训练
     print("==> Compiling model...")
     model.compile()
@@ -75,50 +71,14 @@ if __name__ == '__main__':
     )
 
     # 定义优化器
-    optimizers_with_lrscale: list[tuple[optim.Optimizer, float]] = []
-    if train_config['optimizer'] == 'adamw':
-        optimizers_with_lrscale.append((
-            optim.AdamW(
-                model.parameters(),
-                fused=True,
-                betas=tuple(train_config['betas']),
-                weight_decay=train_config['weight_decay']
-            ),
-            1.0
-        ))
-    elif train_config['optimizer'] == 'muon':
-        muon_params_dict = {
-            n: p for n, p in model.named_parameters()
-            if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n
-        }
-        optimizers_with_lrscale.append((
-            Muon(
-                params=muon_params_dict.values(),
-            ),
-            1.0
-        ))
-        adam_params_dict = {
-            n: p for n, p in model.named_parameters()
-            if n not in muon_params_dict
-        }
-        optimizers_with_lrscale.append((
-            optim.AdamW(
-                adam_params_dict.values(),
-                weight_decay=train_config['weight_decay'],
-                betas=tuple(train_config['betas']),
-                fused=True
-            ),
-            1.0
-        ))
-    else:
-        raise ValueError(f"Unsupported optimizer: {train_config['optimizer']}")
+    optimizers_with_lrscale = get_optimizers(model, train_config)
     # 如果有的话，加载优化器状态
     if train_config['optimizer_state_path']:
-        optimizer_state_path = os.path.join(config_dir, train_config['optimizer_state_path'])
-        print(f"==> Loading optimizer state from {optimizer_state_path}")
-        state_dict_all = torch.load(optimizer_state_path, weights_only=True)
-        for i, state_dict in state_dict_all.items():
-            optimizers_with_lrscale[i][0].load_state_dict(state_dict)
+        optimizers_with_lrscale = load_optimizer_states(
+            config_dir,
+            train_config,
+            optimizers_with_lrscale
+        )
 
     # 定义学习率衰减策略
     lr_schedule = get_lr_schedule(
@@ -179,8 +139,8 @@ if __name__ == '__main__':
                     # 优化器更新参数
                     for optimizer, _ in optimizers_with_lrscale:
                         scaler.step(optimizer)
-                    if model_type == "NGPT":
-                        model.normalize() # NGPT需要在每个训练步进行参数归一化
+                    if model_type == "ngpt":
+                        model.normalize() # NGPT需要在每个训练步进行参数归一化  # pyright: ignore[reportCallIssue]
                     # 更新缩放系数
                     scaler.update()
                     # 保存日志
