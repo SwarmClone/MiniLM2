@@ -9,6 +9,7 @@ from torch import nn, optim
 from flash_muon import Muon
 from typing import Any
 from minilm2.llm.modeling_ngpt import NGPTConfig
+from minilm2.llm.modeling_kimi_linear import KimiLinearConfig
 
 def get_optimizers(model: nn.Module, train_config: dict[str, Any]) -> list[tuple[optim.Optimizer, float]]:
     # 接受模型和训练配置，返回优化器列表
@@ -32,7 +33,9 @@ def get_optimizers(model: nn.Module, train_config: dict[str, Any]) -> list[tuple
             optimizers_with_lrscale.append((
                 Muon(
                     params=muon_params_dict.values(),
-                    weight_decay=train_config['weight_decay']
+                    weight_decay=train_config['weight_decay'],
+                    world_size=1,
+                    rank=0
                 ),
                 1.0
             ))
@@ -77,6 +80,14 @@ def get_model_tokenizer(config_dir: pathlib.Path, train_config: dict[str, Any]) 
                 max_position_embeddings=train_config["max_length"],
                 dropout=train_config["dropout"],
                 rope_base=train_config["rope_base"]
+            )
+        case "kimi_linear":
+            model_config = KimiLinearConfig(
+                vocab_size=2 ** math.ceil(math.log2(vocab_size)),
+                dim=train_config["model_dim"],
+                n_blocks=train_config["num_layers"],
+                n_heads=train_config["num_heads"],
+                dropout=train_config["dropout"],
             )
         case _:
             raise ValueError(f"Unknown model type: {model_type}")

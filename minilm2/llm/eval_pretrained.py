@@ -10,7 +10,8 @@ from transformers import (
     StopStringCriteria,
     EosTokenCriteria
 )
-from .modeling_ngpt import *
+from minilm2.llm.modeling_ngpt import *
+from minilm2.llm.modeling_kimi_linear import *
 from . import config
 
 if __name__ == '__main__':

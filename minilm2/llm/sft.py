@@ -45,7 +45,7 @@ if __name__ == '__main__':
                 param.requires_grad = False
 
     # 将模型移动到显存并编译以加速训练
-    model.to(model, config.DEVICE)
+    model.to(config.DEVICE)
     scaler = GradScaler(enabled=train_config['bfloat16']) # 如果启用bfloat16则启用混合精度训练
     print("==> Compiling model...")
     model.compile()

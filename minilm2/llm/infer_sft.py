@@ -1,7 +1,4 @@
-import math
 import torch
-from tqdm import tqdm
-from torch.nn import functional as F
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -10,7 +7,8 @@ from transformers import (
     StopStringCriteria,
     EosTokenCriteria
 )
-from .modeling_ngpt import *
+from minilm2.llm.modeling_ngpt import *
+from minilm2.llm.modeling_kimi_linear import *
 from . import config
 
 ##!TODO: 使用混合精度训练

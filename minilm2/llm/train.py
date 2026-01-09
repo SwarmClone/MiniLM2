@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from torch.nn import functional as F
 from torch.amp.autocast_mode import autocast
 from torch.amp.grad_scaler import GradScaler
+from torch.distributed import init_process_group, destroy_process_group
 from minilm2.llm.dataset import PreTrainDataset, collate_fn, from_file
 from minilm2.llm.validate import validate
 from minilm2.llm import config
@@ -27,6 +28,9 @@ if __name__ == '__main__':
     config_dir = pathlib.Path(config_path).parent # 配置文件路径
     train_config.update(json.load(open(config_path)))
 
+    # 初始化分布式训练
+    init_process_group(backend='nccl', world_size=1, rank=0)
+
     # 加载tokenizer并获取词表大小
     print("Loading tokenizer and model...")
     model_type = train_config["model"].lower()
@@ -37,7 +41,7 @@ if __name__ == '__main__':
     print(f"==> Number of parameters: {params / 1e6:.2f}M")
 
     # 将模型移动到显存并编译以加速训练
-    model.to(model, config.DEVICE)
+    model.to(config.DEVICE)
     scaler = GradScaler(enabled=train_config['bfloat16']) # 如果启用bfloat16则启用混合精度训练
     print("==> Compiling model...")
     model.compile()
@@ -171,3 +175,5 @@ if __name__ == '__main__':
         checkpoint_name = f'checkpoint_{step}.pt'
         model.save_pretrained(os.path.join(config_dir, checkpoint_name))
         print(f'==> Saved checkpoint to {checkpoint_name}')
+        # 销毁分布式训练
+        destroy_process_group()

@@ -1,4 +1,3 @@
-import math
 from torch.nn.modules.container import ModuleList
 import torch
 from torch import nn
