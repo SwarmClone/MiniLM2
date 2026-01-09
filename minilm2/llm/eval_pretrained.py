@@ -10,7 +10,7 @@ from transformers import (
     StopStringCriteria,
     EosTokenCriteria
 )
-from .model import *
+from .modeling_ngpt import *
 from . import config
 
 if __name__ == '__main__':

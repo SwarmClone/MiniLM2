@@ -5,13 +5,14 @@ from tqdm import tqdm
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
-from torch.amp import autocast, GradScaler
+from torch.amp.autocast_mode import autocast
+from torch.amp.grad_scaler import GradScaler
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from .model import *
-from .dataset_sft import SFTDataset, collate_fn, from_file
-from . import config
-from .lr_schedule import get_lr_schedule
-from .muon import Muon
+from flash_muon import Muon
+from minilm2.llm.modeling_ngpt import *
+from minilm2.llm.dataset_sft import SFTDataset, collate_fn, from_file
+from minilm2.llm import config
+from minilm2.llm.lr_schedule import get_lr_schedule
 
 if __name__ == '__main__':
     import sys
@@ -90,34 +91,16 @@ if __name__ == '__main__':
             n: p for n, p in model.named_parameters()
             if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n
         }
-        muon_params_dict_2x = {
-            n: p for n, p in muon_params_dict.items()
-            if 'w_lora' in n
-        }
-        muon_params_dict_1x = {
-            n: p for n, p in muon_params_dict.items()
-            if 'w_lora' not in n
-        }
+        optimizers_with_lrscale.append((
+            Muon(
+                params=muon_params_dict.values(),
+            ),
+            1.0
+        ))
         adam_params_dict = {
             n: p for n, p in model.named_parameters()
             if n not in muon_params_dict
         }
-        optimizers_with_lrscale.append((
-            Muon(
-                muon_params=muon_params_dict_1x.values(),
-                wd=train_config['weight_decay'],
-                adamw_betas=tuple(train_config['betas'])
-            ),
-            1.0
-        ))
-        optimizers_with_lrscale.append((
-            Muon(
-                muon_params=muon_params_dict_2x.values(),
-                wd=train_config['weight_decay'],
-                adamw_betas=tuple(train_config['betas'])
-            ),
-            2.0
-        ))
         optimizers_with_lrscale.append((
             optim.AdamW(
                 adam_params_dict.values(),

@@ -1,17 +1,16 @@
-from typing import Optional
 from torch.utils.data import Dataset
 import torch
 import numpy as np
 import json
 import os
 
-class PreTrainDataset(Dataset):
+class PreTrainDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     def __init__(
             self,
             data_path: str,
             max_length: int,
-            subset_indexes: Optional[list[int]] = None,
-            used_indexes: Optional[list[int]] = None):
+            subset_indexes: list[int] | None = None,
+            used_indexes: list[int] | None = None):
         self.data_path = data_path
         self.max_length = max_length
         data = np.memmap(self.data_path, dtype=np.uint16, mode="r")
@@ -29,7 +28,7 @@ class PreTrainDataset(Dataset):
     def __len__(self) -> int:
         return len(self.unused_indexes) # 返回未使用的行数
 
-    def __getitem__(self, index) -> tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         index = index % len(self.unused_indexes) # 确保索引在范围内
         abs_index = self.unused_indexes[index]
         line = self.data[abs_index]
@@ -41,7 +40,7 @@ class PreTrainDataset(Dataset):
     def get_used_indexes(self) -> list[int]:
         return sorted(self.used_indexes)
 
-def collate_fn(batch):
+def collate_fn(batch: list[tuple[torch.Tensor, torch.Tensor]]) -> tuple[torch.Tensor, torch.Tensor]:
     x_list, y_list = zip(*batch)
     x = torch.stack(x_list, dim=0)
     y = torch.stack(y_list, dim=0)

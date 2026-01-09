@@ -22,8 +22,14 @@ dependencies = [
 
 [[tool.uv.index]]
 name = "pytorch"
-url = "https://mirrors.aliyun.com/pytorch-wheels/"
+url = "https://mirror.sjtu.edu.cn/pytorch-wheels/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 
 [tool.uv.sources]
 flash-muon = { git = "https://github.com/nil0x9/flash-muon" }
 flash-linear-attention = { git = "https://github.com/fla-org/flash-linear-attention" }
+torch = { index = "pytorch" }

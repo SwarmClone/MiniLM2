@@ -1,19 +1,20 @@
 import math
 import warnings
 import time
-import torch
 from tqdm import tqdm
+import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
-from torch.amp import autocast, GradScaler
+from torch.amp.autocast_mode import autocast
+from torch.amp.grad_scaler import GradScaler
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from .model import *
-from .dataset import PreTrainDataset, collate_fn, from_file
-from .validate import validate
-from . import config
-from .lr_schedule import get_lr_schedule
-from .muon import Muon
+from flash_muon import Muon
+from minilm2.llm.modeling_ngpt import NGPTConfig
+from minilm2.llm.dataset import PreTrainDataset, collate_fn, from_file
+from minilm2.llm.validate import validate
+from minilm2.llm import config
+from minilm2.llm.lr_schedule import get_lr_schedule
 
 if __name__ == '__main__':
     import sys
@@ -37,37 +38,19 @@ if __name__ == '__main__':
     # 根据配置文件创建模型
     model_type = train_config["model"]
     print(f"Loading {model_type} model...")
-    if model_type.lower() == "ngpt":
-        model_config = NGPTConfig(
-            vocab_size=2 ** math.ceil(math.log2(vocab_size)),
-            dim=train_config["model_dim"],
-            n_blocks=train_config["num_layers"],
-            n_heads=train_config["num_heads"],
-            max_position_embeddings=train_config["max_length"],
-            dropout=train_config["dropout"],
-            rope_base=train_config["rope_base"]
-        )
-    elif model_type.lower() == "rwkv7":
-        model_config = RWKV7Config(
-            vocab_size=2 ** math.ceil(math.log2(vocab_size)),
-            dim=train_config["model_dim"],
-            n_blocks=train_config["num_layers"],
-            max_position_embeddings=train_config["max_length"],
-            dropout=train_config["dropout"],
-            max_lr=train_config["max_learning_rate"]
-        )
-    elif model_type.lower() == "gpt":
-        model_config = GPTConfig(
-            vocab_size=2 ** math.ceil(math.log2(vocab_size)),
-            dim=train_config["model_dim"],
-            n_blocks=train_config["num_layers"],
-            n_heads=train_config["num_heads"],
-            max_position_embeddings=train_config["max_length"],
-            dropout=train_config["dropout"],
-            rope_base=train_config["rope_base"]
-        )
-    else:
-        raise ValueError(f"Unknown model type: {model_type}")
+    match model_type.lower():
+        case "ngpt":
+            model_config = NGPTConfig(
+                vocab_size=2 ** math.ceil(math.log2(vocab_size)),
+                dim=train_config["model_dim"],
+                n_blocks=train_config["num_layers"],
+                n_heads=train_config["num_heads"],
+                max_position_embeddings=train_config["max_length"],
+                dropout=train_config["dropout"],
+                rope_base=train_config["rope_base"]
+            )
+        case _:
+            raise ValueError(f"Unknown model type: {model_type}")
     model = (AutoModelForCausalLM.from_pretrained(os.path.join(config_dir, train_config['model_path']))
                 if train_config['model_path'] else
                 AutoModelForCausalLM.from_config(model_config))
@@ -118,40 +101,12 @@ if __name__ == '__main__':
             n: p for n, p in model.named_parameters()
             if p.ndim == 2 and 'wte' not in n and 'lm_head' not in n
         }
-        if model_type == "RWKV7":
-            muon_params_dict_2x = {
-                n: p for n, p in muon_params_dict.items()
-                if 'w_lora' in n
-            }
-            muon_params_dict_1x = {
-                n: p for n, p in muon_params_dict.items()
-                if 'w_lora' not in n
-            }
-            optimizers_with_lrscale.append((
-                Muon(
-                    muon_params=muon_params_dict_1x.values(),
-                    wd=train_config['weight_decay'],
-                    adamw_betas=tuple(train_config['betas'])
-                ),
-                1.0
-            ))
-            optimizers_with_lrscale.append((
-                Muon(
-                    muon_params=muon_params_dict_2x.values(),
-                    wd=train_config['weight_decay'],
-                    adamw_betas=tuple(train_config['betas'])
-                ),
-                2.0
-            ))
-        else:
-            optimizers_with_lrscale.append((
-                Muon(
-                    muon_params=muon_params_dict.values(),
-                    wd=train_config['weight_decay'],
-                    adamw_betas=tuple(train_config['betas'])
-                ),
-                1.0
-            ))
+        optimizers_with_lrscale.append((
+            Muon(
+                params=muon_params_dict.values(),
+            ),
+            1.0
+        ))
         adam_params_dict = {
             n: p for n, p in model.named_parameters()
             if n not in muon_params_dict
