@@ -240,14 +240,17 @@ class NGPT(PreTrainedModel, GenerationMixin):
             past_key_values: DynamicCache | None = None,
             use_cache: bool = False, **kwargs):
         x = self.wte(input_ids)
-        for i, block in enumerate(self.blocks):
-            if not use_cache or past_key_values is None:
+        empty_cache = False
+        if use_cache and past_key_values is None:
+            past_key_values = DynamicCache()
+            empty_cache = True
+        for i in range(self.config.n_blocks):
+            block = self.blocks[i]
+            if empty_cache or not use_cache:
                 x, (k, v) = block(x)
             else:
                 x, (k, v) = block(x, past_key_values=past_key_values[i])
             if use_cache:
-                if past_key_values is None:
-                    past_key_values = DynamicCache()
                 past_key_values.update(k, v, i)
             
         x = self.lm_head(x)

@@ -28,7 +28,10 @@ if __name__ == '__main__':
 
     # 加载tokenizer并获取词表大小
     print("Loading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(os.path.join(config_dir, train_config['tokenizer_path']))
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(os.path.join(config_dir, train_config['model_path'])) # 如果模型自带了tokenizer，就直接加载它
+    except Exception:
+        tokenizer = AutoTokenizer.from_pretrained(os.path.join(config_dir, train_config['tokenizer_path']))
     vocab_size = len(tokenizer)
     print(f"==> Vocab size: {vocab_size}")
 
