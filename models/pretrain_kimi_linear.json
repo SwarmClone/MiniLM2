@@ -21,9 +21,9 @@
     "weight_decay": 0,
     "bfloat16": true,
 
-    "model_path": "checkpoint_2128.pt",
+    "model_path": "checkpoint_3961.pt",
     "optimizer_state_path": "",
-    "checkpoint_step": 0,
+    "checkpoint_step": 3961,
 
     "log_file": "pretrain_kimi_linear.log"
 }

@@ -185,3 +185,5 @@ datasets/
 models/transformers/
 
 .marscode/
+
+typings/**

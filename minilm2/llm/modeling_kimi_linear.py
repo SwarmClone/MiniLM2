@@ -2,22 +2,20 @@ from fla.modules import LayerNorm
 from torch.nn.modules.container import ModuleList
 import torch
 from torch import nn
-import torch.nn.functional as F
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
-from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
-from transformers.generation.utils import GenerationMixin
+from transformers import PreTrainedTokenizerFast
 from transformers.modeling_outputs import CausalLMOutputWithPast, CausalLMOutput
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_utils import PretrainedConfig
 from fla.layers import KimiDeltaAttention
-from fla.models.utils import Cache
+from fla.models.utils import Cache, FLAGenerationMixin
 
 class KimiLinearConfig(PretrainedConfig):
     model_type = "kimi_linear"
     # 默认参数
     vocab_size: int = 32768
     dim = 768
-    n_blocks = 12
+    num_hidden_layers = 12
     n_heads = 12
     dropout = .0
 
@@ -69,9 +67,12 @@ class KimiLinearBlock(nn.Module):
         x = x + self.mlp(self.norm2(x))
         return x, past_key_values
 
-class KimiLinear(PreTrainedModel, GenerationMixin):
+class KimiLinear(PreTrainedModel, FLAGenerationMixin):
     """大模型本体"""
     config_class = KimiLinearConfig
+    all_tied_weights_keys = {
+        "lm_head.weight": "wte.weight",
+    }
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)
         self.config = config
@@ -82,9 +83,17 @@ class KimiLinear(PreTrainedModel, GenerationMixin):
                 self.config.n_heads,
                 self.config.dropout,
                 layer_idx=i
-            ) for i in range(self.config.n_blocks)
+            ) for i in range(self.config.num_hidden_layers)
         ])
-        self.lm_head = nn.Linear(self.config.dim, self.config.vocab_size)
+        self.lm_head = nn.Linear(self.config.dim, self.config.vocab_size, bias=False)
+
+    @classmethod
+    def _prepare_cache_for_generation(cls, generation_config, model_kwargs, generation_mode, batch_size, max_cache_length):
+        if not generation_config.use_cache:
+            return
+        if model_kwargs.get("past_key_values") is not None:
+            return
+        model_kwargs["past_key_values"] = Cache()
 
     def forward(self, input_ids: torch.Tensor,
             return_dict: bool = False,
@@ -104,9 +113,6 @@ class KimiLinear(PreTrainedModel, GenerationMixin):
         if use_cache:
             return CausalLMOutputWithPast(logits=out, past_key_values=past_key_values)
         return CausalLMOutput(logits=out)
-    
-    def prepare_inputs_for_generation(self, input_ids: torch.LongTensor, past_key_values: Cache | None = None, attention_mask: torch.LongTensor | None = None, inputs_embeds: torch.FloatTensor | None = None, cache_position: torch.LongTensor | None = None, token_type_ids: torch.LongTensor | None = None, **kwargs):
-        return super().prepare_inputs_for_generation(input_ids, past_key_values, attention_mask, inputs_embeds, cache_position, **kwargs)
 
 AutoConfig.register("kimi_linear", KimiLinearConfig)
 AutoModelForCausalLM.register(KimiLinearConfig, KimiLinear)

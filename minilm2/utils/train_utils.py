@@ -75,7 +75,7 @@ def get_model_tokenizer(config_dir: pathlib.Path, train_config: dict[str, Any]) 
             model_config = NGPTConfig(
                 vocab_size=2 ** math.ceil(math.log2(vocab_size)),
                 dim=train_config["model_dim"],
-                n_blocks=train_config["num_layers"],
+                num_hidden_layers=train_config["num_layers"],
                 n_heads=train_config["num_heads"],
                 max_position_embeddings=train_config["max_length"],
                 dropout=train_config["dropout"],
@@ -85,7 +85,7 @@ def get_model_tokenizer(config_dir: pathlib.Path, train_config: dict[str, Any]) 
             model_config = KimiLinearConfig(
                 vocab_size=2 ** math.ceil(math.log2(vocab_size)),
                 dim=train_config["model_dim"],
-                n_blocks=train_config["num_layers"],
+                num_hidden_layers=train_config["num_layers"],
                 n_heads=train_config["num_heads"],
                 dropout=train_config["dropout"],
             )

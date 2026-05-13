@@ -18,7 +18,7 @@ class NGPTConfig(PretrainedConfig):
     # 默认参数
     vocab_size: int = 32768
     dim = 768
-    n_blocks = 12
+    num_hidden_layers = 12
     n_heads = 12
     max_position_embeddings = 1024
     dropout = .0
@@ -48,29 +48,20 @@ class RotaryPositionEmbedding(nn.Module):
     def __init__(self, dim: int, max_length: int, base: int = 10000):
         super().__init__()
         assert dim % 2 == 0
-        positions = torch.arange(0, max_length, 1)
-        theta = 1 / base ** (torch.arange(0, dim, 2) / dim)  # thetai = 1/10000^(2i/dim)
-        """
-            theta0  theta1  theta2  theta3 ... theta(dim/2-1)
-        m=0 0theta0 0theta1 0theta2 0theta3
-        m=1 1theta0 1theta1 1theta2 1theta3
-        m=2 2theta0 2theta1 2theta2 2theta3
-        m=3 3theta0 3theta1 3theta2 3theta3
-        ...
-        m=max_length-1                         ...
-        """
-        positions_theta = positions.unsqueeze(1) * theta.unsqueeze(0)  # (max_length, dim//2)
-        positions_sin = torch.sin(positions_theta)
-        positions_cos = torch.cos(positions_theta)
-        self.register_buffer('positions_sin', positions_sin, persistent=False)
-        self.register_buffer('positions_cos', positions_cos, persistent=False)
         self.dim = dim
+        self.max_length = max_length
+        self.base = base
+
+    def _compute_sin_cos(self, device: torch.device, offset: int, length: int):
+        positions = torch.arange(offset, offset + length, device=device).float()
+        theta = 1 / self.base ** (torch.arange(0, self.dim, 2, device=device).float() / self.dim)
+        positions_theta = positions.unsqueeze(1) * theta.unsqueeze(0)
+        return torch.sin(positions_theta), torch.cos(positions_theta)
 
     def forward(self, x: torch.Tensor, *, offset: int = 0) -> torch.Tensor:
-        x_real = x[..., :self.dim // 2]  # (x.size(-2), dim//2)
+        x_real = x[..., :self.dim // 2]
         x_imag = x[..., self.dim // 2:]
-        pos_cos = self.positions_cos[offset:offset + x.size(-2)] # (x.size(-2), dim//2)  # pyright: ignore[reportIndexIssue]
-        pos_sin = self.positions_sin[offset:offset + x.size(-2)]  # pyright: ignore[reportIndexIssue]
+        pos_sin, pos_cos = self._compute_sin_cos(x.device, offset, x.size(-2))
         y_real = x_real * pos_cos - x_imag * pos_sin
         y_imag = x_real * pos_sin + x_imag * pos_cos
         return torch.cat([y_real, y_imag], dim=-1)
@@ -223,9 +214,11 @@ class NGPT(PreTrainedModel, GenerationMixin):
                 self.config.n_heads,
                 self.config.dropout,
                 self.config.rope_base
-            ) for _ in range(self.config.n_blocks)
+            ) for _ in range(self.config.num_hidden_layers)
         ])
         self.lm_head = nn.Linear(self.config.dim, self.config.vocab_size)
+
+        self.all_tied_weights_keys = {}
 
         # Logit缩放因数
         szinit = 1.0
@@ -241,15 +234,19 @@ class NGPT(PreTrainedModel, GenerationMixin):
             use_cache: bool = False, **kwargs):
         x = self.wte(input_ids)
         empty_cache = False
-        if use_cache and past_key_values is None:
-            past_key_values = DynamicCache()
-            empty_cache = True
-        for i in range(self.config.n_blocks):
+        if use_cache:
+            if past_key_values is None:
+                past_key_values = DynamicCache()
+                empty_cache = True
+            elif past_key_values.get_seq_length() == 0:
+                empty_cache = True
+        for i in range(self.config.num_hidden_layers):
             block = self.blocks[i]
             if empty_cache or not use_cache:
                 x, (k, v) = block(x)
             else:
-                x, (k, v) = block(x, past_key_values=past_key_values[i])
+                layer = past_key_values.layers[i]
+                x, (k, v) = block(x, past_key_values=(layer.keys, layer.values))
             if use_cache:
                 past_key_values.update(k, v, i)
             
@@ -269,8 +266,6 @@ class NGPT(PreTrainedModel, GenerationMixin):
         for block in self.blocks:
             block.normalize()  # pyright: ignore[reportCallIssue]
     
-    def prepare_inputs_for_generation(self, input_ids: torch.LongTensor, past_key_values: Cache | None = None, attention_mask: torch.LongTensor | None = None, inputs_embeds: torch.FloatTensor | None = None, cache_position: torch.LongTensor | None = None, token_type_ids: torch.LongTensor | None = None, **kwargs):
-        return super().prepare_inputs_for_generation(input_ids, past_key_values, attention_mask, inputs_embeds, cache_position, **kwargs)
 
 AutoConfig.register("ngpt", NGPTConfig)
 AutoModelForCausalLM.register(NGPTConfig, NGPT)
